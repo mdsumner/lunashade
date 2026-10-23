@@ -48,6 +48,21 @@
       <label>Show</label>
       <label class="radio"><input type="radio" name="mode" value="shade" checked> shade now</label>
       <label class="radio"><input type="radio" name="mode" value="hours"> hours of sun</label>
+      <label class="radio"><input type="radio" name="mode" value="view"> viewshed</label>
+    </div>
+    <div id="viewrow" class="row" hidden>
+      <label for="eye">Eye</label>
+      <select id="eye" title="Height of the eye above the ground">
+        <option value="1.5" selected>1.5 m (standing)</option>
+        <option value="5">5 m</option>
+        <option value="10">10 m</option>
+        <option value="30">30 m (tower)</option>
+      </select>
+      <select id="range" title="How far out to look">
+        <option value="10000">to 10 km</option>
+        <option value="20000" selected>to 20 km</option>
+        <option value="40000">to 40 km</option>
+      </select>
     </div>
     <div id="hoursrow" class="row" hidden>
       <button id="calchours">Calculate hours of sun for the day</button>
@@ -64,7 +79,8 @@
     </div>
     <div id="probe" class="probe" hidden></div>
     <div class="foot">
-      Tap inside the loaded square for the skyline and sun path at that spot.
+      Tap inside the loaded square for the skyline and sun path at that spot (and, in viewshed mode, what can be
+      seen from there).
       <a href="docs/">Notes</a> - <a href="docs/lunamap.html">lunamap fold-in</a> -
       <a href="https://github.com/mdsumner/lunashade">source</a>
       <div class="credit">Ground only: bare-earth terrain shadows, no trees or buildings.

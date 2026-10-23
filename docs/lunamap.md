@@ -59,6 +59,13 @@ segments by first direct sun of the day, or hours of sun, for the date. This cou
 roads near the pin, or be precomputed for each month for the whole area a group covers and saved with the
 offline road pack.
 
+### 3a. What can be seen from here
+
+The [viewshed](viewshed.html) answers "what ground can be seen from this pin" (or from a tower at 30 m),
+with the skyline as a by-product. For a brigade: lookout coverage, where a smoke column could be seen from,
+radio line of sight to a repeater (with the caveat that radio is not quite line of sight). It reads the
+same DEM; a few seconds per spot at the moment.
+
 ### 4. Precomputed, statewide
 
 Store horizon angles (or monthly hours of sun) for the whole state in object storage, so any of the above

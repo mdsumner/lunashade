@@ -146,7 +146,7 @@
 
   // ---- state ----------------------------------------------------------------------
   var st = null;          // loaded area: { target grid geometry, overlay mapping, lat, lon, theta, E, N }
-  var overlay = null, outline = null, probeMarker = null, hours = null, lastShade = null, lastSun = null;
+  var overlay = null, outline = null, probeMarker = null, hours = null, lastShade = null, lastSun = null, lastView = null;
   var status = function (s) { $("status").innerHTML = s; };
   function mode() { return document.querySelector("input[name=mode]:checked").value; }
   function dateStr() { return $("date").value; }
@@ -170,7 +170,7 @@
     var nb = [tb[0] - margin, tb[1] - margin, tb[2] + margin, tb[3] + margin];
     var fb = [cen[0] - FAR_RADIUS, cen[1] - FAR_RADIUS, cen[0] + FAR_RADIUS, cen[1] + FAR_RADIUS];
     var farCell = Math.max(64, cell * 8);
-    $("load").disabled = true; hours = null; lastShade = null;
+    $("load").disabled = true; hours = null; lastShade = null; lastView = null;
     status("Reading the DEM (" + km + " km at " + cell + " m, plus " + (margin / 1000) + " km margin and " +
       (FAR_RADIUS / 1000) + " km of surround at " + farCell + " m) ...");
     var t0 = performance.now();
@@ -270,9 +270,20 @@
       }
       $("legend").innerHTML = "<div class='bar' style='background:linear-gradient(to right," + RAMP.join(",") + ")'></div>" +
         "<div class='ticks'><span>0 h</span><span>hours of direct sun, " + dateStr() + "</span><span>" + top.toFixed(1) + " h</span></div>";
+    } else if (mode() === "view" && lastView) {
+      var cov = lastView.cov;
+      for (i = 0; i < n; i++) {
+        k = idx[i];
+        if (k < 0) { data[4 * i + 3] = 0; continue; }
+        var fr = cov[k] / 4;
+        data[4 * i] = Math.round(22 + fr * (249 - 22)); data[4 * i + 1] = Math.round(26 + fr * (201 - 26)); data[4 * i + 2] = Math.round(70 + fr * (50 - 70));
+        data[4 * i + 3] = Math.round(255 * (0.75 - 0.35 * fr));
+      }
+      $("legend").innerHTML = "<span style='display:inline-block;width:14px;height:10px;background:#f9c932;vertical-align:middle'></span> " +
+        "ground visible from the spot &nbsp; <span style='display:inline-block;width:14px;height:10px;background:#16184a;vertical-align:middle'></span> hidden";
     } else {
       for (i = 0; i < n; i++) data[4 * i + 3] = 0;
-      $("legend").innerHTML = mode() === "hours" ? "<span class='status'>Not calculated yet for this date.</span>" : "";
+      $("legend").innerHTML = mode() === "view" ? "<span class='status'>Tap a spot in the loaded square to see what is visible from it.</span>" : mode() === "hours" ? "<span class='status'>Not calculated yet for this date.</span>" : "";
     }
     st.ctx.putImageData(st.img, 0, 0);
   }
@@ -351,9 +362,31 @@
     updateURL();
     if (probeMarker) probeMarker.setLatLng(latlng); else probeMarker = L.circleMarker(latlng, { radius: 6, color: "#e65100", weight: 2, fillOpacity: 0.3 }).addTo(map);
     $("probe").hidden = false; $("probe").innerHTML = "Tracing the skyline ...";
+    if (mode() === "view") viewshed(q);
     ask({ type: "horizon", E: q[0], N: q[1], maxDist: FAR_RADIUS }).then(function (m) {
       if (m.none) { $("probe").innerHTML = "Outside the loaded terrain."; return; }
       probeHz = m.angles; drawProbe();
+    });
+  }
+  // ---- viewshed from the tapped spot (js/osvm.js) ---------------------------------------
+  var viewBusy = false, viewAgain = null;
+  function viewshed(q) {
+    if (viewBusy) { viewAgain = q; return; }
+    viewBusy = true;
+    var eye = +$("eye").value, range = +$("range").value;
+    status("Working out what is visible from the spot (" + eye + " m eye, out to " + (range / 1000) + " km) ...");
+    ask({ type: "viewshed", E: q[0], N: q[1], eye: eye, maxDist: range }).then(function (m) {
+      viewBusy = false;
+      if (m.none) status("Outside the loaded terrain.");
+      else {
+        lastView = m;
+        var s = 0; for (var i = 0; i < m.cov.length; i++) s += m.cov[i];
+        status("Viewshed: " + (100 * s / (4 * m.cov.length)).toFixed(1) + "% of the square is visible from " + eye + " m above the spot; " +
+          (m.area / 1e6).toFixed(2) + " km2 visible out to " + (range / 1000) + " km. " + (m.nTri / 1e6).toFixed(2) + " M triangles, " +
+          (m.nVisTri / 1e3).toFixed(0) + " k partly visible, in " + (m.ms / 1000).toFixed(1) + " s.");
+        draw();
+      }
+      if (viewAgain) { var nq = viewAgain; viewAgain = null; viewshed(nq); }
     });
   }
   function sunDay(d, lat, lon, hz) {
@@ -418,7 +451,8 @@
     if (Q.get("dem")) p.set("dem", Q.get("dem"));
     if (st) { p.set("at", st.lat.toFixed(5) + "," + st.lon.toFixed(5)); p.set("detail", st.detail); }
     p.set("date", dateStr()); p.set("time", String(minutes()));
-    if (mode() === "hours") p.set("mode", "hours");
+    if (mode() !== "shade") p.set("mode", mode());
+    if (mode() === "view") p.set("eye", $("eye").value);
     if (probeAt) p.set("probe", probeAt.ll.lat.toFixed(6) + "," + probeAt.ll.lng.toFixed(6));
     var c = map.getCenter();
     history.replaceState(null, "", location.pathname + "?" + p.toString().replace(/%2C/g, ",") +
@@ -433,7 +467,11 @@
     b.onclick = function () { $("date").value = dateStr().slice(0, 4) + "-" + b.dataset.d; hours = null; refresh(); drawProbe(); updateURL(); };
   });
   Array.prototype.forEach.call(document.querySelectorAll("input[name=mode]"), function (r) {
-    r.onchange = function () { $("hoursrow").hidden = mode() !== "hours"; refresh(); updateURL(); };
+    r.onchange = function () {
+      $("hoursrow").hidden = mode() !== "hours"; $("viewrow").hidden = mode() !== "view";
+      if (mode() === "view" && probeAt && !lastView) viewshed([probeAt.E, probeAt.N]);
+      refresh(); updateURL();
+    };
   });
   $("calchours").onclick = calcHours;
   $("opacity").oninput = function () { if (overlay) overlay.setOpacity(+$("opacity").value); };
@@ -448,6 +486,10 @@
   };
   if (Q.get("detail")) $("detail").value = Q.get("detail");
   if (Q.get("mode") === "hours") { document.querySelector("input[name=mode][value=hours]").checked = true; $("hoursrow").hidden = false; }
+  if (Q.get("mode") === "view") { document.querySelector("input[name=mode][value=view]").checked = true; $("viewrow").hidden = false; }
+  if (Q.get("eye")) $("eye").value = Q.get("eye");
+  function reView() { lastView = null; if (probeAt && mode() === "view") viewshed([probeAt.E, probeAt.N]); else draw(); updateURL(); }
+  $("eye").onchange = reView; $("range").onchange = reView;
   showSun(); updatePreview();
   if (Q.get("load") || startAt || startProbe) load();
   window.lunashade = { map: map, state: function () { return st; }, load: load, calcHours: calcHours };

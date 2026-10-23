@@ -11,6 +11,8 @@ Pan to a place, choose an area and detail (2 km at 2 m up to 16 km at 16 m), and
 - **Hours of sun**: hours of direct sun on each cell for the day.
 - **Skyline**: tap a spot for its horizon traced 40 km out, the sun's path for the date and both
   solstices, and first and last direct sun to the minute.
+- **Viewshed**: tap a spot for the ground visible from it (eye 1.5 to 30 m, out to 10, 20 or 40 km), computed
+  exactly on a triangulation of the terrain ([method](docs/viewshed.md)).
 - **Share a spot**: the address bar always holds the loaded area, date, time and tapped spot, and the
   skyline panel has a Share / Copy link button. Opening the link loads the same terrain and skyline.
 
@@ -26,8 +28,10 @@ A static page (plain HTML, CSS and JavaScript, no build step) on GitHub Pages.
 | `js/app.js` | map, DEM reads (geotiff.js, COG overviews), overlay drawing, skyline chart |
 | `js/worker.js` | holds the terrain and runs the shading off the main thread |
 | `js/engine.js` | the shadow sweep (O(N) per sun position), near/far domain, skyline probe |
+| `js/osvm.js` | the viewshed: an object-space visibility map over the DEM as triangles ([method](docs/viewshed.md)) |
 | `js/sun.js` | sun position (NOAA equations) and Hobart local time |
 | `test/test-engine.js` | `node test/test-engine.js`: sweep vs brute force, near/far vs one fine grid, timing |
+| `test/test-osvm.js` | `node test/test-osvm.js`: viewshed vs brute-force line of sight, skyline vs the probe, timing |
 | `test/make_synth.py`, `test/serve.js` | a synthetic MGA zone 55 COG and a range-request server for local testing |
 
 The method is written up in [docs/index.md](docs/index.md). In short: one directional sweep per sun position
@@ -37,7 +41,7 @@ distant ridges (with earth curvature), and the fine grid casts locally.
 Run locally with any static server that supports HTTP range requests, for example
 `node test/serve.js . 8765`, then open <http://localhost:8765/>. `?dem=URL` points the page at another COG
 (MGA94 zone 55, metres). Other query parameters: `at=lat,lon` (centre of the area), `detail` (2, 4, 8 or 16),
-`date`, `time` (minutes after local midnight), `mode=hours`, `probe=lat,lon` (the tapped spot); any of
+`date`, `time` (minutes after local midnight), `mode=hours` or `mode=view`, `eye` (metres, viewshed), `probe=lat,lon` (the tapped spot); any of
 `at`, `probe` or `load=1` loads straight away. The hash holds the map view.
 
 ## Data

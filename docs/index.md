@@ -85,6 +85,12 @@ NOAA solar calculator equations with standard refraction, against true north. Th
 slightly from true north (meridian convergence, about 0.2 degrees around Hobart), so sun azimuths are
 converted to grid azimuths before sweeping. Times are Australia/Hobart local, daylight saving included.
 
+## Viewshed
+
+What can be seen from a tapped spot, computed as an exact object-space visibility map on the DEM as
+triangles: gnomonic wedges around the eye, a front-to-back walk with no sort, and a horizon kept as an
+upper envelope. The horizon left at the end is the skyline. Written up in [viewshed](viewshed.html).
+
 ## The bigger product: a horizon-angle stack
 
 The prototype computes on demand for a few kilometres at a time. A statewide version could keep the same
@@ -117,6 +123,8 @@ better thing to publish, keeping the horizon stack as the source to recompute th
 
 ## Testing
 
+- `node test/test-osvm.js` checks the viewshed against brute-force line of sight on the same TIN, and its
+  skyline against the probe.
 - `node test/test-engine.js` checks the sweep against brute force and the near/far split against a single
   fine grid, and times a sweep.
 - `test/make_synth.py` writes a synthetic MGA zone 55 COG with overviews, and `test/serve.js` serves it with

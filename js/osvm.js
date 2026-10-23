@@ -33,6 +33,10 @@
 //    image plane is projective, so straight lines map to straight lines: each
 //    visible piece in (u, v) maps back to a convex polygon on the triangle in plan.
 //
+// The code is in three layers: Horizon (the kernel: triangles in, in front-to-back order),
+// sources that feed it (gridSource, meshSource) and orders (the Manhattan walk built into
+// gridSource; orderTopo for any mesh). viewshed() and viewshedMesh() put them together.
+//
 // Grids are as in engine.js: north-up, z Float32Array w x h, row 0 at the top,
 // square cells of `cell` metres, x0 / ytop the outer corner. TIN vertices are the
 // cell centres; each quad of 4 neighbouring centres is split on the diagonal from
@@ -228,23 +232,20 @@
     return m;
   }
 
-  // ---- the viewshed --------------------------------------------------------------------
-  // rings: [near, far, ...] grids, each finer and inside the next; quads of ring k > 0 that
-  //   touch ring k-1's vertex hull are skipped (ring k-1 already covers them, nearer).
-  // opts: eye (m above the TIN, default 1.5), sectors (per 90 deg wedge, default 64),
-  //   curvature (default true), maxDist (m, default Infinity), pieces (keep the visible
-  //   polygons, default true).
-  // Returns { E, N, zEye, area, nTri, nVisTri, pieces: { xy, off, tri, ring, n }, skyline }.
-  function viewshed(rings, E0, N0, opts) {
+  // ---- the kernel: triangles in, front to back ---------------------------------------------
+  // Horizon(zEye, opts): a viewshed under construction for an eye at plan (0, 0) and height
+  // zEye. Feed triangles with tri() in a front-to-back order, plan coordinates relative to the
+  // eye, heights absolute. The kernel does not care where the triangles come from: a grid
+  // (gridSource), an explicit mesh (meshSource with orderTopo), or anything else that can
+  // promise the order. opts: sectors (per 90 deg wedge, default 64), curvature (default true),
+  // pieces (keep the visible polygons, default true), E, N (added back to piece coordinates).
+  function Horizon(zEye, opts) {
     opts = opts || {};
-    var eye = opts.eye === undefined ? 1.5 : opts.eye, S = opts.sectors || 64;
-    var curv = opts.curvature !== false, maxDist = opts.maxDist || Infinity, keep = opts.pieces !== false;
-    var zg = sampleTIN(rings[0], E0, N0);
-    if (zg === null) return null;
-    var zEye = zg + eye, sec = makeSectors(S), NS = 4 * S, eps = 1e-3;
-    // growable piece store
-    var cap = 1 << 16, xy = new Float64Array(cap * 2), nxy = 0, off = [0], tri = [], ringOf = [];
-    var area = 0, nTri = 0, nVis = 0, nHid = 0, curTri = -1, curRing = 0, curSec = null, plA = 0, plB = 0, plC = 0, triVisible = false;
+    var S = opts.sectors || 64, curv = opts.curvature !== false, keep = opts.pieces !== false;
+    var E0 = opts.E || 0, N0 = opts.N || 0, k2 = curv ? 1 / (2 * R_EFF) : 0;
+    var sec = makeSectors(S), NS = 4 * S, eps = 1e-3;
+    var xy = new Float64Array(1 << 17), nxy = 0, off = [0], tri = [], tagOf = [];
+    var area = 0, nTri = 0, nVis = 0, nHid = 0, curTri = -1, curTag = 0, curSec = null, plA = 0, plB = 0, plC = 0, triVisible = false;
     var PU = new Float64Array(16), PV = new Float64Array(16), QX = new Float64Array(8), QY = new Float64Array(8);
     function back(u, v, k) {        // image point -> plan (relative), into QX/QY[k]
       var dx = curSec.fx + u * curSec.rx, dy = curSec.fy + u * curSec.ry, den = v - plA * dx - plB * dy;
@@ -262,10 +263,12 @@
       if (!keep) return;
       if (nxy + 2 * n > xy.length) { var nb = new Float64Array(xy.length * 2); nb.set(xy); xy = nb; }
       for (k = 0; k < n; k++) { xy[nxy++] = QX[k] + E0; xy[nxy++] = QY[k] + N0; }
-      off.push(nxy / 2); tri.push(curTri); ringOf.push(curRing);
+      off.push(nxy / 2); tri.push(curTri); tagOf.push(curTag);
     }
-    function doTriangle(ax, ay, az, bx, by, bz, cx, cy, cz) {
-      nTri++; triVisible = false;
+    // id: the caller's triangle id; tag: a small integer carried to the pieces (ring, source)
+    function addTriangle(id, tag, ax, ay, za, bx, by, zb, cx, cy, zc) {
+      nTri++; triVisible = false; curTri = id; curTag = tag;
+      var az = za - zEye - (ax * ax + ay * ay) * k2, bz = zb - zEye - (bx * bx + by * by) * k2, cz = zc - zEye - (cx * cx + cy * cy) * k2;
       // plane z = A x + B y + C
       var ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
       var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
@@ -274,7 +277,7 @@
       plA = A; plB = B; plC = az - A * ax - B * ay;
       // which sectors: azimuth span of the vertices
       var s0, s1, all = false;
-      var o1 = ax * by - ay * bx, o2 = bx * cy - by * cx, o3 = cx * ay - cy * ax;   // origin inside?
+      var o1 = ax * by - ay * bx, o2 = bx * cy - by * cx, o3 = cx * ay - cy * ax;   // eye inside?
       if ((o1 >= 0 && o2 >= 0 && o3 >= 0) || (o1 <= 0 && o2 <= 0 && o3 <= 0)) all = true;
       else {
         var aa = Math.atan2(ax, ay) / RAD, ab = Math.atan2(bx, by) / RAD, ac = Math.atan2(cx, cy) / RAD;
@@ -311,62 +314,168 @@
       }
       if (triVisible) nVis++;
     }
-    var t0 = Date.now();
-    for (var ri = 0; ri < rings.length; ri++) {
-      var g = rings[ri], inner = ri > 0 ? rings[ri - 1] : null, w = g.w, h = g.h, z = g.z, cell = g.cell;
-      if (w < 2 || h < 2) continue;
-      curRing = ri;
-      var hx0, hx1, hy0, hy1;
-      if (inner) { hx0 = inner.x0 + 0.5 * inner.cell; hx1 = inner.x0 + (inner.w - 0.5) * inner.cell;
-                   hy1 = inner.ytop - 0.5 * inner.cell; hy0 = inner.ytop - (inner.h - 0.5) * inner.cell; }
-      var pc = (E0 - g.x0) / cell - 0.5, pr = (g.ytop - N0) / cell - 0.5;
-      var cp = Math.max(0, Math.min(w - 2, Math.floor(pc))), rp = Math.max(0, Math.min(h - 2, Math.floor(pr)));
-      var K = Math.max(cp, w - 2 - cp) + Math.max(rp, h - 2 - rp);
-      var maxQ = maxDist / cell + 1;
-      for (var kk = 0; kk <= K; kk++) {
-        if (kk > maxQ * 1.4143 + 2) break;
-        var dlo = Math.max(-kk, -cp), dhi = Math.min(kk, w - 2 - cp);
-        for (var di = dlo; di <= dhi; di++) {
-          var c = cp + di, rem = kk - Math.abs(di);
-          for (var side = 0; side < (rem ? 2 : 1); side++) {
-            var r = side ? rp + rem : rp - rem;
-            if (r < 0 || r > h - 2) continue;
-            // plan coordinates of the quad's corners, relative to the observer
-            var xl = g.x0 + (c + 0.5) * cell - E0, xr = xl + cell, yt = g.ytop - (r + 0.5) * cell - N0, yb = yt - cell;
-            if (inner && xr + E0 >= hx0 && xl + E0 <= hx1 && yt + N0 >= hy0 && yb + N0 <= hy1) continue;
-            if (maxDist < Infinity) {
-              var mx = Math.max(0, Math.abs(xl + 0.5 * cell) - 0.5 * cell), my = Math.max(0, Math.abs(yt - 0.5 * cell) - 0.5 * cell);
-              if (mx * mx + my * my > maxDist * maxDist) continue;
-            }
-            var i0 = r * w + c;
-            var ztl = z[i0] - zEye, ztr = z[i0 + 1] - zEye, zbl = z[i0 + w] - zEye, zbr = z[i0 + w + 1] - zEye;
-            if (curv) {
-              var k2 = 1 / (2 * R_EFF);
-              ztl -= (xl * xl + yt * yt) * k2; ztr -= (xr * xr + yt * yt) * k2;
-              zbl -= (xl * xl + yb * yb) * k2; zbr -= (xr * xr + yb * yb) * k2;
-            }
-            var qi = (r * (w - 1) + c) * 2, aFirst = (pc - c) >= (pr - r);
-            for (var half = 0; half < 2; half++) {
-              var isA = (half === 0) === aFirst;
-              curTri = qi + (isA ? 0 : 1);
-              if (isA) doTriangle(xl, yt, ztl, xr, yt, ztr, xr, yb, zbr);     // TL, TR, BR
-              else doTriangle(xl, yt, ztl, xr, yb, zbr, xl, yb, zbl);         // TL, BR, BL
-            }
+    // the horizon now, as elevation angle (deg) at whole azimuths clockwise from plan north
+    function skyline() {
+      var sky = new Float32Array(360);
+      for (var az = 0; az < 360; az++) {
+        var a2 = az >= 315 ? az - 360 : az, si2 = sectorOf(a2, S), sc2 = sec[si2], wq = Math.floor(si2 / S);
+        var u = Math.tan((a2 - wq * 90) * RAD), v = evalRight(sc2, u);
+        sky[az] = v <= NEGV ? -90 : Math.atan(v / Math.sqrt(1 + u * u)) / RAD;
+      }
+      return sky;
+    }
+    function result() {
+      var nEnv = 0; for (var s2 = 0; s2 < NS; s2++) nEnv += sec[s2].eu.length;
+      return { E: E0, N: N0, zEye: zEye, area: area, nTri: nTri, nVisTri: nVis, nQuickHidden: nHid, envelopePoints: nEnv,
+               pieces: { xy: xy.subarray(0, nxy), off: Uint32Array.from(off), tri: Int32Array.from(tri), ring: Uint8Array.from(tagOf), n: tri.length },
+               skyline: skyline() };
+    }
+    return { tri: addTriangle, skyline: skyline, result: result };
+  }
+
+  // ---- source: a grid, quads in increasing Manhattan offset ---------------------------------
+  // Calls H.tri for every triangle of grid g (vertices at cell centres, quads split TL-BR) in
+  // front-to-back order from the eye at (E0, N0). Triangle ids are quad * 2 + (0: TL,TR,BR;
+  // 1: TL,BR,BL), quad = row * (w - 1) + col. opts: hole (a grid whose vertex hull is skipped:
+  // the next-finer ring, already done), maxDist (m), tag.
+  function gridSource(H, g, E0, N0, opts) {
+    opts = opts || {};
+    var w = g.w, h = g.h, z = g.z, cell = g.cell, inner = opts.hole || null, maxDist = opts.maxDist || Infinity, tag = opts.tag || 0;
+    if (w < 2 || h < 2) return;
+    var hx0, hx1, hy0, hy1;
+    if (inner) { hx0 = inner.x0 + 0.5 * inner.cell; hx1 = inner.x0 + (inner.w - 0.5) * inner.cell;
+                 hy1 = inner.ytop - 0.5 * inner.cell; hy0 = inner.ytop - (inner.h - 0.5) * inner.cell; }
+    var pc = (E0 - g.x0) / cell - 0.5, pr = (g.ytop - N0) / cell - 0.5;
+    var cp = Math.max(0, Math.min(w - 2, Math.floor(pc))), rp = Math.max(0, Math.min(h - 2, Math.floor(pr)));
+    var K = Math.max(cp, w - 2 - cp) + Math.max(rp, h - 2 - rp), maxQ = maxDist / cell + 1;
+    for (var kk = 0; kk <= K; kk++) {
+      if (kk > maxQ * 1.4143 + 2) break;
+      var dlo = Math.max(-kk, -cp), dhi = Math.min(kk, w - 2 - cp);
+      for (var di = dlo; di <= dhi; di++) {
+        var c = cp + di, rem = kk - Math.abs(di);
+        for (var side = 0; side < (rem ? 2 : 1); side++) {
+          var r = side ? rp + rem : rp - rem;
+          if (r < 0 || r > h - 2) continue;
+          var xl = g.x0 + (c + 0.5) * cell - E0, xr = xl + cell, yt = g.ytop - (r + 0.5) * cell - N0, yb = yt - cell;
+          if (inner && xr + E0 >= hx0 && xl + E0 <= hx1 && yt + N0 >= hy0 && yb + N0 <= hy1) continue;
+          if (maxDist < Infinity) {
+            var mx = Math.max(0, Math.abs(xl + 0.5 * cell) - 0.5 * cell), my = Math.max(0, Math.abs(yt - 0.5 * cell) - 0.5 * cell);
+            if (mx * mx + my * my > maxDist * maxDist) continue;
+          }
+          var i0 = r * w + c, ztl = z[i0], ztr = z[i0 + 1], zbl = z[i0 + w], zbr = z[i0 + w + 1];
+          var qi = (r * (w - 1) + c) * 2;
+          if ((pc - c) >= (pr - r)) {
+            H.tri(qi, tag, xl, yt, ztl, xr, yt, ztr, xr, yb, zbr);
+            H.tri(qi + 1, tag, xl, yt, ztl, xr, yb, zbr, xl, yb, zbl);
+          } else {
+            H.tri(qi + 1, tag, xl, yt, ztl, xr, yb, zbr, xl, yb, zbl);
+            H.tri(qi, tag, xl, yt, ztl, xr, yt, ztr, xr, yb, zbr);
           }
         }
       }
     }
-    // skyline: the final envelope, as elevation angle (deg) at whole grid azimuths
-    var sky = new Float32Array(360);
-    for (var az = 0; az < 360; az++) {
-      var a2 = az >= 315 ? az - 360 : az, si2 = sectorOf(a2, S), sc2 = sec[si2], wq = Math.floor(si2 / S);
-      var u = Math.tan((a2 - wq * 90) * RAD), v = evalRight(sc2, u);
-      sky[az] = v <= NEGV ? -90 : Math.atan(v / Math.sqrt(1 + u * u)) / RAD;
+  }
+
+  // ---- source: an explicit mesh -------------------------------------------------------------
+  // mesh: { x, y, z (vertex arrays, absolute), tri (Uint32Array, 3 per triangle) }. Any
+  // triangulation: grid, Delaunay, constrained Delaunay, adaptive.
+  //
+  // orderTopo(mesh, E0, N0): a front-to-back order from the eye. Along any plan ray from the
+  // eye, the triangles crossed are neighbours across shared edges, each crossed from the side
+  // facing the eye. So "the triangle on the eye's side of a shared edge goes first", over all
+  // shared edges, is the whole in-front relation, and a topological sort of it is a valid
+  // order. It works for any triangulation of a convex region (a plan ray must not leave the
+  // mesh and come back). Delaunay meshes never have a cycle (Edelsbrunner); others can. Any
+  // triangles caught in a cycle are appended nearest first and counted in `cycles`.
+  function orderTopo(mesh, E0, N0) {
+    var T = mesh.tri, nt = T.length / 3, nv = mesh.x.length, X = mesh.x, Y = mesh.y;
+    var edge = new Map(), indeg = new Uint32Array(nt), adjStart, adj, i, k;
+    var from = [], to = [];
+    for (var t = 0; t < nt; t++) for (k = 0; k < 3; k++) {
+      var a = T[3 * t + k], b = T[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a, o = edge.get(key);
+      if (o === undefined) { edge.set(key, t); continue; }
+      edge.delete(key);
+      // t and o share edge a-b: which one is on the eye's side?
+      var opp = T[3 * t + (k + 2) % 3];
+      var ex = X[b] - X[a], ey = Y[b] - Y[a];
+      var se = ex * (N0 - Y[a]) - ey * (E0 - X[a]), st = ex * (Y[opp] - Y[a]) - ey * (X[opp] - X[a]);
+      if (Math.abs(se) <= 1e-9 * (Math.abs(ex) + Math.abs(ey)) * (Math.abs(E0 - X[a]) + Math.abs(N0 - Y[a]) + 1)) continue;   // eye on the edge's line
+      if ((se > 0) === (st > 0)) { from.push(t); to.push(o); } else { from.push(o); to.push(t); }
     }
-    var nEnv = 0; for (var s2 = 0; s2 < NS; s2++) nEnv += sec[s2].eu.length;
-    return { E: E0, N: N0, zEye: zEye, area: area, nTri: nTri, nVisTri: nVis, nQuickHidden: nHid, envelopePoints: nEnv, ms: Date.now() - t0,
-             pieces: { xy: xy.subarray(0, nxy), off: Uint32Array.from(off), tri: Int32Array.from(tri), ring: Uint8Array.from(ringOf), n: tri.length },
-             skyline: sky };
+    adjStart = new Uint32Array(nt + 1);
+    for (i = 0; i < from.length; i++) { adjStart[from[i] + 1]++; indeg[to[i]]++; }
+    for (i = 0; i < nt; i++) adjStart[i + 1] += adjStart[i];
+    adj = new Uint32Array(from.length); var fill = adjStart.slice(0, nt);
+    for (i = 0; i < from.length; i++) adj[fill[from[i]]++] = to[i];
+    var order = new Uint32Array(nt), head = 0, tail = 0, done = new Uint8Array(nt);
+    // start from the eye's triangle outwards (any order is valid; nearest-first keeps it tidy)
+    var d2 = new Float64Array(nt), seeds = [];
+    for (t = 0; t < nt; t++) {
+      var cx = (X[T[3 * t]] + X[T[3 * t + 1]] + X[T[3 * t + 2]]) / 3 - E0, cy = (Y[T[3 * t]] + Y[T[3 * t + 1]] + Y[T[3 * t + 2]]) / 3 - N0;
+      d2[t] = cx * cx + cy * cy;
+      if (indeg[t] === 0) seeds.push(t);
+    }
+    seeds.sort(function (p, q) { return d2[p] - d2[q]; });
+    for (i = 0; i < seeds.length; i++) { order[tail++] = seeds[i]; done[seeds[i]] = 1; }
+    while (head < tail) {
+      var u = order[head++];
+      for (k = adjStart[u]; k < adjStart[u + 1]; k++) { var v = adj[k]; if (--indeg[v] === 0 && !done[v]) { done[v] = 1; order[tail++] = v; } }
+    }
+    var cycles = nt - tail;
+    if (cycles) {
+      var rest = [];
+      for (t = 0; t < nt; t++) if (!done[t]) rest.push(t);
+      rest.sort(function (p, q) { return d2[p] - d2[q]; });
+      for (i = 0; i < rest.length; i++) order[tail++] = rest[i];
+    }
+    return { order: order, cycles: cycles, constraints: from.length };
+  }
+  function meshSource(H, mesh, order, E0, N0, opts) {
+    opts = opts || {};
+    var T = mesh.tri, X = mesh.x, Y = mesh.y, Z = mesh.z, tag = opts.tag || 0;
+    for (var i = 0; i < order.length; i++) {
+      var t = order[i], a = T[3 * t], b = T[3 * t + 1], c = T[3 * t + 2];
+      H.tri(t, tag, X[a] - E0, Y[a] - N0, Z[a], X[b] - E0, Y[b] - N0, Z[b], X[c] - E0, Y[c] - N0, Z[c]);
+    }
+  }
+  // height on a mesh at (E, N) (linear scan), or null
+  function sampleMesh(mesh, E, N) {
+    var T = mesh.tri, X = mesh.x, Y = mesh.y, Z = mesh.z;
+    for (var t = 0; t < T.length / 3; t++) {
+      var a = T[3 * t], b = T[3 * t + 1], c = T[3 * t + 2];
+      var d = (Y[b] - Y[c]) * (X[a] - X[c]) + (X[c] - X[b]) * (Y[a] - Y[c]);
+      var l1 = ((Y[b] - Y[c]) * (E - X[c]) + (X[c] - X[b]) * (N - Y[c])) / d, l2 = ((Y[c] - Y[a]) * (E - X[c]) + (X[a] - X[c]) * (N - Y[c])) / d, l3 = 1 - l1 - l2;
+      if (l1 >= -1e-12 && l2 >= -1e-12 && l3 >= -1e-12) return l1 * Z[a] + l2 * Z[b] + l3 * Z[c];
+    }
+    return null;
+  }
+
+  // ---- the viewshed, composed --------------------------------------------------------------
+  // viewshed(rings, E, N, opts): rings [near, far, ...] are grids, each finer and inside the
+  // next; ring k > 0 skips quads touching ring k-1 (a plan ray leaves a convex ring once, so
+  // everything in it is in front of everything outside). opts: eye (m above the ground,
+  // default 1.5), maxDist (m), and the Horizon options.
+  // Returns the Horizon result plus ms.
+  function viewshed(rings, E0, N0, opts) {
+    opts = opts || {};
+    var eye = opts.eye === undefined ? 1.5 : opts.eye, zg = sampleTIN(rings[0], E0, N0);
+    if (zg === null) return null;
+    var t0 = Date.now(), H = Horizon(zg + eye, { sectors: opts.sectors, curvature: opts.curvature, pieces: opts.pieces, E: E0, N: N0 });
+    for (var ri = 0; ri < rings.length; ri++) gridSource(H, rings[ri], E0, N0, { hole: ri > 0 ? rings[ri - 1] : null, maxDist: opts.maxDist, tag: ri });
+    var res = H.result(); res.ms = Date.now() - t0;
+    return res;
+  }
+  // viewshedMesh(mesh, E, N, opts): the same from an explicit mesh, ordered by orderTopo
+  // unless opts.order is given. Adds `cycles` (triangles that had to be forced into order).
+  function viewshedMesh(mesh, E0, N0, opts) {
+    opts = opts || {};
+    var eye = opts.eye === undefined ? 1.5 : opts.eye, zg = sampleMesh(mesh, E0, N0);
+    if (zg === null) return null;
+    var t0 = Date.now(), ord = opts.order ? { order: opts.order, cycles: 0 } : orderTopo(mesh, E0, N0);
+    var t1 = Date.now(), H = Horizon(zg + eye, { sectors: opts.sectors, curvature: opts.curvature, pieces: opts.pieces, E: E0, N: N0 });
+    meshSource(H, mesh, ord.order, E0, N0, { tag: opts.tag });
+    var res = H.result(); res.ms = Date.now() - t0; res.msOrder = t1 - t0; res.cycles = ord.cycles;
+    return res;
   }
 
   // Visible fraction of each cell of grid g, from the pieces of ring `ring`, sampled on an
@@ -403,7 +512,8 @@
     return out;
   }
 
-  var api = { viewshed: viewshed, coverage: coverage, sampleTIN: sampleTIN, R_EFF: R_EFF };
+  var api = { viewshed: viewshed, viewshedMesh: viewshedMesh, Horizon: Horizon, gridSource: gridSource, meshSource: meshSource,
+              orderTopo: orderTopo, sampleTIN: sampleTIN, sampleMesh: sampleMesh, coverage: coverage, R_EFF: R_EFF };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.LunaOSVM = api;
 })(typeof self !== "undefined" ? self : this);

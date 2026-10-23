@@ -129,7 +129,59 @@ function coarsen(g, f) {
   console.log("coverage on the near grid: " + (100 * s / (4 * cov.length)).toFixed(1) + "% of samples visible");
 })();
 
-// 4. timing at app sizes: 1000 x 1000 near at 4 m, far 1250 x 1250 at 64 m
+// 4. the explicit-mesh path: the grid as a mesh, ordered by orderTopo (edge adjacency).
+//    (a) same diagonals as gridSource: same answer; (b) diagonals flipped at random: check
+//    against brute force on that mesh.
+function gridMesh(g, flip) {
+  var nv = g.w * g.h, x = new Float64Array(nv), y = new Float64Array(nv), z = new Float64Array(nv), tri = [];
+  for (var r = 0; r < g.h; r++) for (var c = 0; c < g.w; c++) { var i = r * g.w + c; x[i] = g.x0 + (c + 0.5) * g.cell; y[i] = g.ytop - (r + 0.5) * g.cell; z[i] = g.z[i]; }
+  for (r = 0; r < g.h - 1; r++) for (c = 0; c < g.w - 1; c++) {
+    var tl = r * g.w + c, tr = tl + 1, bl = tl + g.w, br = bl + 1;
+    if (flip && flip[r * (g.w - 1) + c]) tri.push(tl, tr, bl, tr, br, bl);    // TR-BL diagonal
+    else tri.push(tl, tr, br, tl, br, bl);                                      // TL-BR, as gridSource
+  }
+  return { x: x, y: y, z: z, tri: Uint32Array.from(tri) };
+}
+(function () {
+  var g4 = terrain(160, 150, 10, 500000, 5250000, 4), E0 = g4.x0 + 70.3 * 10, N0 = g4.ytop - 81.7 * 10;
+  var rg = O.viewshed([g4], E0, N0, { eye: 2 });
+  var rm = O.viewshedMesh(gridMesh(g4, null), E0, N0, { eye: 2 });
+  var rel = Math.abs(rg.area - rm.area) / rg.area;
+  console.log("mesh path, same diagonals: area " + (rm.area / 1e6).toFixed(4) + " km2 vs grid " + (rg.area / 1e6).toFixed(4) +
+    " (rel diff " + rel.toExponential(1) + "), cycles " + rm.cycles + ", order " + rm.msOrder + " ms, total " + rm.ms + " ms");
+  if (rel > 1e-6 || rm.cycles) fails++;
+  // (b) random diagonals
+  var flip = new Uint8Array((g4.w - 1) * (g4.h - 1)); for (var i = 0; i < flip.length; i++) flip[i] = rnd() < 0.5 ? 1 : 0;
+  var mesh = gridMesh(g4, flip), rf = O.viewshedMesh(mesh, E0, N0, { eye: 2 });
+  function sampleFlip(x, y) {
+    var u = (x - g4.x0) / g4.cell - 0.5, v = (g4.ytop - y) / g4.cell - 0.5;
+    if (u < 0 || v < 0 || u > g4.w - 1 || v > g4.h - 1) return null;
+    var c = Math.min(g4.w - 2, Math.floor(u)), r = Math.min(g4.h - 2, Math.floor(v)), fx = u - c, fy = v - r, w = g4.w, z = g4.z;
+    var tl = z[r * w + c], tr = z[r * w + c + 1], bl = z[(r + 1) * w + c], br = z[(r + 1) * w + c + 1];
+    if (!flip[r * (w - 1) + c]) return fx >= fy ? tl + fx * (tr - tl) + fy * (br - tr) : tl + fy * (bl - tl) + fx * (br - bl);
+    return fx + fy <= 1 ? tl + fx * (tr - tl) + fy * (bl - tl) : br + (1 - fx) * (bl - br) + (1 - fy) * (tr - br);
+  }
+  function triFlip(x, y) {
+    var u = (x - g4.x0) / g4.cell - 0.5, v = (g4.ytop - y) / g4.cell - 0.5, c = Math.floor(u), r = Math.floor(v), q = r * (g4.w - 1) + c;
+    return 2 * q + (flip[q] ? (u - c) + (v - r) <= 1 ? 0 : 1 : (u - c) >= (v - r) ? 0 : 1);
+  }
+  var byTri = {};
+  for (var p = 0; p < rf.pieces.n; p++) (byTri[rf.pieces.tri[p]] = byTri[rf.pieces.tri[p]] || []).push(p);
+  var n = 0, agree = 0;
+  for (var k = 0; k < 3000; k++) {
+    var x = g4.x0 + g4.cell * (0.6 + rnd() * (g4.w - 2.2)), y = g4.ytop - g4.cell * (0.6 + rnd() * (g4.h - 2.2));
+    var z1 = sampleFlip(x, y), dx = x - E0, dy = y - N0, d = Math.sqrt(dx * dx + dy * dy), m = -1e9, ns = Math.ceil(d / (g4.cell / 16));
+    for (var j = 1; j < ns; j++) { var t = j / ns; if (d * (1 - t) < g4.cell * 0.05) break;
+      var curvd = (t * d) * (t * d) / (2 * O.R_EFF), zz = sampleFlip(E0 + t * dx, N0 + t * dy) - curvd;
+      var mm = zz - (rf.zEye + t * (z1 - d * d / (2 * O.R_EFF) - rf.zEye)); if (mm > m) m = mm; }
+    if (Math.abs(m) < 0.05) continue;
+    n++; if ((m < 0) === pointInPieces(rf, byTri[triFlip(x, y)] || [], x, y)) agree++;
+  }
+  console.log("mesh path, random diagonals: agreement with brute LOS " + (100 * agree / n).toFixed(2) + "% of " + n + ", cycles " + rf.cycles);
+  if (agree / n < 0.995 || rf.cycles) fails++;
+})();
+
+// 5. timing at app sizes: 1000 x 1000 near at 4 m, far 1250 x 1250 at 64 m
 (function () {
   var near = terrain(1000, 1000, 4, 0, 4000, 3), far = terrain(1250, 1250, 64, -38000, 42000, 3);
   var res = O.viewshed([near, far], 2000, 2000, { eye: 1.5 });

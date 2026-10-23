@@ -181,7 +181,15 @@ fn process_poly(sec: &mut Sector, pu: &mut [f64], pv: &[f64], scr: &mut Scratch)
     let (u0, u1) = (sec.u0, sec.u1);
     let (mut umin, mut umax) = (f64::INFINITY, f64::NEG_INFINITY);
     for u in pu.iter_mut() {
-        *u = u.clamp(u0, u1);
+        // clamp, and snap vertices made by clipping on the sector's edges (they land a
+        // rounding error inside, which would leave a sliver of no horizon at the edge)
+        *u = if *u < u0 + 1e-12 {
+            u0
+        } else if *u > u1 - 1e-12 {
+            u1
+        } else {
+            *u
+        };
         umin = umin.min(*u);
         umax = umax.max(*u);
     }
@@ -514,6 +522,13 @@ impl Horizon {
             while amin >= 315.0 {
                 amin -= 360.0;
                 amax -= 360.0;
+            }
+            // widen by a hair: a vertex exactly on a sector boundary must not leave a gap there
+            amin -= 1e-9;
+            amax += 1e-9;
+            if amin < -45.0 {
+                amin += 360.0;
+                amax += 360.0;
             }
             s0 = self.sector_of(amin);
             s1 = if amax >= 315.0 {

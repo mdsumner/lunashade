@@ -59,6 +59,16 @@ cases.forEach(function (cs) {
   lines.push(Array.from(res.skyline).map(String).join(" "));
   console.log("case " + cs.join(",") + ": area " + res.area.toFixed(1) + " m2, " + res.nTri + " tri, " + res.pieces.n + " pieces");
 });
+// shade: the sweep on the near grid alone, and the near + far domain
+var E_ = require("../js/engine.js"), shadeCases = [[30, 12, 0], [200, 4, 0], [95, 25, 0], [310, 16, 1], [140, 3, 1]];
+lines.push(String(shadeCases.length));
+shadeCases.forEach(function (sc) {
+  var m = sc[2] ? new E_.Domain(near, far).shadeAt(sc[0], sc[1], 0.2) : E_.sweep(near.z, near.w, near.h, near.cell, sc[0], sc[1]).shade;
+  lines.push(sc.join(" "));
+  lines.push(Array.from(m).join(""));
+  var s = 0; for (var i = 0; i < m.length; i++) s += m[i];
+  console.log("shade " + sc.join(",") + ": " + (100 * s / m.length).toFixed(1) + "% in shadow");
+});
 var out = path.join(__dirname, "..", "rust", "osvm", "tests", "fixtures", "parity.txt");
 fs.writeFileSync(out, lines.join("\n") + "\n");
 console.log("wrote " + out);

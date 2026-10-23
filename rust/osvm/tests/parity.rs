@@ -1,6 +1,6 @@
 // Parity with js/osvm.js: tests/fixtures/parity.txt is written by
 // `node test/make-parity.js` in lunashade and holds the JS answers for a few viewsheds.
-use osvm::{viewshed, viewshed_mesh, Grid, Mesh, ViewshedOptions};
+use osvm::{sweep, viewshed, viewshed_mesh, Grid, Mesh, ShadeDomain, SweepOptions, ViewshedOptions};
 
 struct Tok<'a>(std::str::SplitAsciiWhitespace<'a>);
 impl Tok<'_> {
@@ -92,6 +92,24 @@ fn matches_js() {
         );
         assert_eq!(cycles, cyc, "case {ci}: cycles");
         assert!(dsky < 1e-4, "case {ci}: skyline");
+    }
+    // shade masks, cell for cell
+    let ns = t.u();
+    for si in 0..ns {
+        let (az, elev, two) = (t.f(), t.f(), t.u());
+        let want: Vec<u8> = t.0.next().unwrap().bytes().map(|b| b - b'0').collect();
+        let got = if two == 1 {
+            ShadeDomain::new(views[0], Some(views[1])).shade_at(az, elev, 0.2)
+        } else {
+            let g = &views[0];
+            sweep(g.z, g.w, g.h, g.cell, az, elev, &SweepOptions::default()).0
+        };
+        let diff = got.iter().zip(&want).filter(|(a, b)| a != b).count();
+        println!(
+            "shade {si}: az {az} elev {elev} two-level {two}: {diff} of {} cells differ",
+            want.len()
+        );
+        assert_eq!(diff, 0, "shade case {si}");
     }
 }
 

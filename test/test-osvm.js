@@ -181,6 +181,15 @@ function gridMesh(g, flip) {
   if (agree / n < 0.995 || rf.cycles) fails++;
 })();
 
+// 4b. an eye at the exact centre of a quad puts triangle corners exactly on sector
+//     boundaries (45 degree diagonals, wedge centres): the skyline must have no gaps
+(function () {
+  var g5 = terrain(120, 100, 10, 0, 1000, 5), res = O.viewshed([g5], 60 * 10, 1000 - 50 * 10, { eye: 1.5 });
+  var low = 0; for (var a = 0; a < 360; a++) if (res.skyline[a] < -89) low++;
+  console.log("eye at a quad centre: " + low + " skyline directions with nothing seen");
+  if (low) fails++;
+})();
+
 // 5. timing at app sizes: 1000 x 1000 near at 4 m, far 1250 x 1250 at 64 m
 (function () {
   var near = terrain(1000, 1000, 4, 0, 4000, 3), far = terrain(1250, 1250, 64, -38000, 42000, 3);

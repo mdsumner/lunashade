@@ -117,7 +117,9 @@
   function processPoly(sec, n, PU, PV, emit) {
     var i, umin = Infinity, umax = -Infinity, u0 = sec.u0, u1 = sec.u1;
     for (i = 0; i < n; i++) {
-      if (PU[i] < u0) PU[i] = u0; else if (PU[i] > u1) PU[i] = u1;
+      // clamp, and snap vertices made by clipping on the sector's edges (they land a
+      // rounding error inside, which would leave a sliver of no horizon at the edge)
+      if (PU[i] < u0 + 1e-12) PU[i] = u0; else if (PU[i] > u1 - 1e-12) PU[i] = u1;
       if (PU[i] < umin) umin = PU[i]; if (PU[i] > umax) umax = PU[i];
     }
     if (umax - umin < TINY) return;
@@ -285,6 +287,9 @@
         var amin = Math.min(aa, ab, ac), amax = Math.max(aa, ab, ac);
         while (amin < -45) { amin += 360; amax += 360; }
         while (amin >= 315) { amin -= 360; amax -= 360; }
+        // widen by a hair: a vertex exactly on a sector boundary must not leave a gap there
+        amin -= 1e-9; amax += 1e-9;
+        if (amin < -45) { amin += 360; amax += 360; }
         s0 = sectorOf(amin, S);
         s1 = amax >= 315 ? NS + sectorOf(amax - 360, S) : sectorOf(amax, S);
       }

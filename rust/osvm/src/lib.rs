@@ -17,6 +17,10 @@
 //!
 //! [`viewshed`] and [`viewshed_mesh`] put them together.
 //!
+//! Cast shadows (a viewshed from the sun, where the rays are parallel) have their own,
+//! much faster grid algorithm: [`sweep`], one directional pass per sun position, and
+//! [`ShadeDomain`] for a fine near grid with a coarse far field.
+//!
 //! ## How the kernel works
 //!
 //! 1. *Gnomonic wedges.* Around the eye, four 90 degree wedges of azimuth (N, E, S, W),
@@ -44,11 +48,13 @@ mod coverage;
 mod grid;
 mod horizon;
 mod mesh;
+mod shade;
 
 pub use coverage::coverage;
 pub use grid::{grid_source, sample_tin, Grid, GridSourceOptions};
 pub use horizon::{Horizon, HorizonOptions, Pieces, ViewshedResult, R_EFF};
 pub use mesh::{mesh_source, order_topo, sample_mesh, Mesh, TopoOrder};
+pub use shade::{sweep, ShadeDomain, SweepOptions};
 
 /// Options for [`viewshed`] and [`viewshed_mesh`].
 #[derive(Clone, Debug)]

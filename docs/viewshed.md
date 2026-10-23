@@ -58,6 +58,26 @@ marching rays across cells. Code: [`js/osvm.js`](../js/osvm.js); tests: `node te
 The horizon left at the end is the **skyline** at the spot, for free. It is the same quantity the
 skyline probe ray-marches, and the horizon-angle stack in [the notes](./) would store.
 
+## Code layout: kernel, sources, orders
+
+The JavaScript and the Rust crate ([`rust/osvm`](../rust/osvm/)) have the same three layers:
+
+- **The kernel** (`Horizon`) takes triangles in front-to-back order and returns area, visible pieces and
+  skyline. It knows nothing about where the triangles come from.
+- **Sources** feed it: a grid (walked by Manhattan offset, as above) or an explicit mesh (vertex and
+  index arrays: any triangulation).
+- **Orders** for explicit meshes: `orderTopo` / `order_topo`. Along a plan ray from the eye, the triangles
+  crossed are neighbours across shared edges, each crossed from the side facing the eye. So "the
+  triangle on the eye's side of a shared edge goes first", over all shared edges, is the whole
+  in-front relation. A topological sort of it is a valid order, in linear time. Delaunay meshes never
+  have a cycle; constrained or adaptive meshes might, so triangles caught in a cycle are counted and
+  appended nearest first. The mesh must cover a convex region, so that no plan ray leaves the mesh and
+  comes back.
+
+The Rust crate is checked against the JavaScript: `node test/make-parity.js` writes a fixture of JS
+answers, and `cargo test` in `rust/osvm` compares. They agree to the last digit of visible area and on
+every count. The Rust version is about 2 times faster: 1.4 s against 2.5 s for 5.1 M triangles.
+
 ## How well it works
 
 `node test/test-osvm.js` on synthetic terrain:
@@ -68,6 +88,9 @@ skyline probe ray-marches, and the horizon-angle stack in [the notes](./) would 
   brute-force check.
 - **With curvature**, on a 19 km square at 64 m: 100% agreement against brute force with the same
   vertex drop.
+- **The explicit-mesh path** gives the same area as the grid path when the diagonals match (relative
+  difference 1e-15). With diagonals flipped at random it agrees with brute force on 99.97% of points,
+  with no cycles.
 - **Skyline vs the ray-marched probe** (bilinear heights, a different surface model): mean difference
   0.012 degrees, maximum 0.11 degrees.
 - **Speed (node, one thread).** About 100,000 triangles take 0.2 to 0.4 s. At app size (1000 x 1000 at
@@ -93,6 +116,8 @@ skyline probe ray-marches, and the horizon-angle stack in [the notes](./) would 
   than two triangles per cell. The catch: visibility is decided at ridgelines, so simplification has to
   protect silhouette edges, not just bound vertical error. A Delaunay TIN keeps exact front-to-back
   order through the power-distance sort.
+- **Bindings for the Rust crate**: R through extendr, taking meshes as plain vertex and triangle tables,
+  so mesh producers and this kernel stay independent; and WebAssembly for this page.
 - **Vector output.** The visible pieces are already polygons in MGA zone 55 (`pieces` in the result),
   so a GeoJSON download, or a dissolved outline, is a short step.
 - **GPU for interaction.** A depth cube map rendered from the eye (an omnidirectional shadow map) gives an

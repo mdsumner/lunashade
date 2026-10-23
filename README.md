@@ -32,6 +32,7 @@ A static page (plain HTML, CSS and JavaScript, no build step) on GitHub Pages.
 | `js/sun.js` | sun position (NOAA equations) and Hobart local time |
 | `test/test-engine.js` | `node test/test-engine.js`: sweep vs brute force, near/far vs one fine grid, timing |
 | `test/test-osvm.js` | `node test/test-osvm.js`: viewshed vs brute-force line of sight, skyline vs the probe, timing |
+| `rust/osvm/` | the viewshed kernel as a Rust crate, checked against `js/osvm.js` (`node test/make-parity.js`, then `cargo test`) |
 | `test/make_synth.py`, `test/serve.js` | a synthetic MGA zone 55 COG and a range-request server for local testing |
 
 The method is written up in [docs/index.md](docs/index.md). In short: one directional sweep per sun position

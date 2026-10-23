@@ -93,8 +93,10 @@ skyline probe ray-marches, and the horizon-angle stack in [the notes](./) would 
   than two triangles per cell. The catch: visibility is decided at ridgelines, so simplification has to
   protect silhouette edges, not just bound vertical error. A Delaunay TIN keeps exact front-to-back
   order through the power-distance sort.
-- **Vector output.** The visible pieces are already polygons in MGA zone 55 (`pieces` in the result),
-  so a GeoJSON download, or a dissolved outline, is a short step.
+- **Vector output.** *Download GeoJSON* now exports the visible ground as dissolved polygons at the
+  grid's cell size (a cell counts as visible when at least half of its 4 sample points are). The exact
+  pieces (`pieces` in the result, in MGA zone 55) are finer than that, but there are hundreds of thousands
+  of them; an exact export wants a polygon union, or pieces only within a short distance of the eye.
 - **GPU for interaction.** A depth cube map rendered from the eye (an omnidirectional shadow map) gives an
   image-space viewshed fast enough to drag the eye around. The object-space version stays the one to
   export.

@@ -91,6 +91,20 @@ What can be seen from a tapped spot, computed as an exact object-space visibilit
 triangles: gnomonic wedges around the eye, a front-to-back walk with no sort, and a horizon kept as an
 upper envelope. The horizon left at the end is the skyline. Written up in [viewshed](viewshed.html).
 
+## Exporting
+
+*Download GeoJSON* writes what is shown as polygons that follow cell edges (shadow at the time, hours of
+sun in 1-hour bands, or the visible ground with the observer), in WGS84 lon/lat, with the settings and
+the area analysed as properties and features. Grids become polygons by tracing every in/out cell boundary
+into rings, outer rings counter-clockwise and holes clockwise. Cells that touch only at a corner stay
+separate.
+
+## The DEM file
+
+Load speed depends on how the COG is cut. The status line reports requests, bytes and time for opening
+the file, the square and the surround; [checking the DEM COG](cog.html) explains what to look for and
+how to check it with gdalraster.
+
 ## The bigger product: a horizon-angle stack
 
 The prototype computes on demand for a few kilometres at a time. A statewide version could keep the same
@@ -123,6 +137,7 @@ better thing to publish, keeping the horizon stack as the source to recompute th
 
 ## Testing
 
+- `node test/test-polygonize.js` checks the GeoJSON polygons against the grid they came from.
 - `node test/test-osvm.js` checks the viewshed against brute-force line of sight on the same TIN, and its
   skyline against the probe.
 - `node test/test-engine.js` checks the sweep against brute force and the near/far split against a single

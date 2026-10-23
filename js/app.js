@@ -73,6 +73,25 @@
   var CanvasOverlay = L.SVGOverlay.extend({});
 
   // ---- DEM access (after lunamap's js/profile.js) -------------------------------
+  // count the requests geotiff.js makes for the DEM (and their bytes), to see what a load costs
+  var net = { n: 0, bytes: 0 }, realFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    var url = typeof input === "string" ? input : (input && input.url) || "";
+    if (url.split("?")[0] !== DEM_URL.split("?")[0]) return realFetch(input, init);
+    net.n++;
+    var hd = init && init.headers, rg = hd ? (typeof hd.get === "function" ? hd.get("Range") : (hd.Range || hd.range)) : null;
+    var m = rg && /bytes=(\d+)-(\d+)/.exec(rg);
+    return realFetch(input, init).then(function (resp) {
+      var cl = +resp.headers.get("content-length");
+      net.bytes += cl > 0 ? cl : (m ? +m[2] - +m[1] + 1 : 0);
+      return resp;
+    });
+  };
+  function netMark() { return { n: net.n, bytes: net.bytes, t: performance.now() }; }
+  function netSince(a) {
+    var b = netMark(), kb = (b.bytes - a.bytes) / 1024;
+    return (b.n - a.n) + " req, " + (kb > 1024 ? (kb / 1024).toFixed(1) + " MB" : Math.round(kb) + " KB") + ", " + ((b.t - a.t) / 1000).toFixed(1) + " s";
+  }
   var demPromise = null;
   function openDEM() {
     if (!demPromise) demPromise = GeoTIFF.fromUrl(DEM_URL, { allowFullFile: false }).then(function (tiff) {
@@ -173,8 +192,17 @@
     $("load").disabled = true; hours = null; lastShade = null; lastView = null;
     status("Reading the DEM (" + km + " km at " + cell + " m, plus " + (margin / 1000) + " km margin and " +
       (FAR_RADIUS / 1000) + " km of surround at " + farCell + " m) ...");
-    var t0 = performance.now();
-    Promise.all([readMGA(nb, cell), readMGA(fb, farCell)]).then(function (r) {
+    var t0 = performance.now(), m0 = netMark(), diag = {};
+    // one after the other (not in parallel) so each step's cost can be reported
+    openDEM().then(function () {
+      diag.open = netSince(m0); var m1 = netMark();
+      status("Reading the square (" + km + " km at " + cell + " m) ...");
+      return readMGA(nb, cell).then(function (near) {
+        diag.square = netSince(m1); var m2 = netMark();
+        status("Reading the surround (" + (FAR_RADIUS / 500) + " km square at " + farCell + " m) ...");
+        return readMGA(fb, farCell).then(function (far) { diag.surround = netSince(m2); return [near, far]; });
+      });
+    }).then(function (r) {
       var near = r[0], far = r[1];
       var T = { c0: Math.round((tb[0] - near.x0) / near.cell), r0: Math.round((near.ytop - tb[3]) / near.cell) };
       T.c1 = Math.min(near.w, T.c0 + Math.round(size / near.cell)); T.r1 = Math.min(near.h, T.r0 + Math.round(size / near.cell));
@@ -184,7 +212,8 @@
       var tz = new Float32Array(tg.w * tg.h);
       for (var y = 0; y < tg.h; y++) tz.set(near.z.subarray((T.r0 + y) * near.w + T.c0, (T.r0 + y) * near.w + T.c1), y * tg.w);
       var ll = proj4(MGA94, "EPSG:4326", cen);
-      st = { tg: tg, tz: tz, lat: ll[1], lon: ll[0], detail: $("detail").value, theta: convergence(ll[0], ll[1]), nearCell: near.cell, farCell: far.cell,
+      st = { diag: diag, near: { w: near.w, h: near.h, cell: near.cell, x0: near.x0, ytop: near.ytop },
+             far: { w: far.w, h: far.h, cell: far.cell, x0: far.x0, ytop: far.ytop }, tg: tg, tz: tz, lat: ll[1], lon: ll[0], detail: $("detail").value, theta: convergence(ll[0], ll[1]), nearCell: near.cell, farCell: far.cell,
              nearLevel: near.level, farLevel: far.level, farBlock: far.block, zmax: zmax };
       buildOverlay();
       var secs = ((performance.now() - t0) / 1000).toFixed(1);
@@ -192,7 +221,8 @@
                  [near.z.buffer, far.z.buffer]).then(function () {
         status("Loaded " + tg.w + " x " + tg.h + " cells at " + st.nearCell.toFixed(1) + " m, surround at " +
           st.farCell.toFixed(0) + " m, in " + secs + " s. Highest ground in view: " + Math.round(zmax) + " m." +
-          " <span style='color:#888'>(COG overview " + st.nearLevel + " / " + st.farLevel + (st.farBlock > 1 ? ", averaged x" + st.farBlock : "") + ")</span>");
+          " <span style='color:#888'>(COG overview " + st.nearLevel + " / " + st.farLevel + (st.farBlock > 1 ? ", averaged x" + st.farBlock : "") + ")</span>" +
+          "<div style='color:#888'>DEM reads: open " + diag.open + "; square " + diag.square + "; surround " + diag.surround + "</div>");
         $("load").disabled = false;
         refresh(); updateURL();
         if (probeNext) { var pn = probeNext; probeNext = null; probe(pn); }
@@ -286,6 +316,8 @@
       $("legend").innerHTML = mode() === "view" ? "<span class='status'>Tap a spot in the loaded square to see what is visible from it.</span>" : mode() === "hours" ? "<span class='status'>Not calculated yet for this date.</span>" : "";
     }
     st.ctx.putImageData(st.img, 0, 0);
+    var md = mode();
+    $("export").disabled = !((md === "shade" && lastShade) || (md === "hours" && hours) || (md === "view" && lastView));
   }
 
   // ---- shade at a time ---------------------------------------------------------------
@@ -435,6 +467,92 @@
       "<div class='row'><button id='sharelink'>" + (navigator.share ? "Share" : "Copy") + " a link to this spot</button><span id='sharemsg' class='status'></span></div>" +
       "<div class='status'>Skyline traced " + (FAR_RADIUS / 1000) + " km out from 1.5 m above the ground, with earth curvature; terrain only.</div>";
   }
+
+  // ---- GeoJSON snapshot of what is shown -------------------------------------------------
+  // Grids are turned into dissolved polygons along cell edges (js/polygonize.js), in GDA94 /
+  // MGA zone 55, then written as WGS84 lon/lat (RFC 7946). A feature for the area analysed is
+  // included, so "no polygon" can be told apart from "not looked at".
+  var DEM_CREDIT = "Tasmania 2 m DEM, Mineral Resources Tasmania / theLIST (CC BY 3.0 AU), via Source Cooperative";
+  function lonlatRing(xy) {
+    var out = [];
+    for (var i = 0; i < xy.length; i += 2) {
+      var ll = proj4(MGA94, "EPSG:4326", [xy[i], xy[i + 1]]);
+      out.push([Math.round(ll[0] * 1e7) / 1e7, Math.round(ll[1] * 1e7) / 1e7]);
+    }
+    return out;
+  }
+  function multiPolygon(res) { return { type: "MultiPolygon", coordinates: res.polygons.map(function (p) { return p.map(lonlatRing); }) }; }
+  function boxFeature(g, props) {
+    var x1 = g.x0 + g.w * g.cell, y1 = g.ytop - g.h * g.cell;
+    var ring = lonlatRing([g.x0, y1, x1, y1, x1, g.ytop, g.x0, g.ytop, g.x0, y1]);
+    return { type: "Feature", properties: props, geometry: { type: "Polygon", coordinates: [ring] } };
+  }
+  function common(extra) {
+    var o = { generator: "lunashade (https://github.com/mdsumner/lunashade)", created: new Date().toISOString(),
+              elevation: DEM_CREDIT, terrain: "bare earth only: no trees or buildings",
+              geometry_note: "cell edges of a GDA94 / MGA zone 55 grid, as WGS84 lon/lat" };
+    for (var k in extra) o[k] = extra[k];
+    return o;
+  }
+  function saveJSON(fc, name) {
+    var blob = new Blob([JSON.stringify(fc)], { type: "application/geo+json" }), a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    return blob.size;
+  }
+  function exportGeoJSON() {
+    if (!st) return;
+    var md = mode(), d = dateStr(), hhmm = S.fmtClock(minutes()), feats = [], P = window.LunaPoly, msg = $("exportmsg");
+    var stamp = d + "-" + hhmm.replace(":", "");
+    msg.textContent = " building ...";
+    function finish(name) {
+      var fc = { type: "FeatureCollection", features: feats }, size = saveJSON(fc, name);
+      msg.textContent = " " + name + " (" + (size > 1048576 ? (size / 1048576).toFixed(1) + " MB" : Math.round(size / 1024) + " KB") + ")";
+    }
+    function fail(e) { console.error(e); msg.textContent = " could not export: " + (e && e.message ? e.message : e); }
+    setTimeout(function () {
+      try {
+        if (md === "shade" && lastShade) {
+          var sun = lastSun || S.sunPosition(utcNow(), st.lat, st.lon);
+          feats.push(boxFeature(st.tg, common({ product: "area analysed", cell_m: st.tg.cell })));
+          feats.push({ type: "Feature", geometry: multiPolygon(P.polygonize(lastShade, st.tg)),
+            properties: common({ product: "terrain shadow", date: d, time_local: hhmm, timezone: "Australia/Hobart",
+              sun_azimuth_deg: +sun.az.toFixed(2), sun_elevation_deg: +sun.elev.toFixed(2), cell_m: st.tg.cell }) });
+          finish("lunashade-shade-" + stamp + ".geojson");
+        } else if (md === "hours" && hours) {
+          var hv = hours.hours, lab = new Uint8Array(hv.length), top = 0;
+          for (var i = 0; i < hv.length; i++) { lab[i] = Math.min(23, Math.floor(hv[i] + 1e-6)); if (lab[i] > top) top = lab[i]; }
+          feats.push(boxFeature(st.tg, common({ product: "area analysed", cell_m: st.tg.cell })));
+          P.polygonizeClasses(lab, st.tg, top + 1).forEach(function (res, k) {
+            if (!res.polygons.length) return;
+            feats.push({ type: "Feature", geometry: multiPolygon(res), properties: common({ product: "hours of direct sun", date: hours.date,
+              timezone: "Australia/Hobart", hours_from: k, hours_to: k + 1, daylight_hours: +hours.daylight.toFixed(2), cell_m: st.tg.cell }) });
+          });
+          finish("lunashade-sunhours-" + hours.date + ".geojson");
+        } else if (md === "view" && lastView && probeAt) {
+          ask({ type: "viewexport" }).then(function (m) {
+            try {
+              if (m.none) throw new Error("no viewshed to export");
+              var eye = +$("eye").value, range = +$("range").value, mask, k;
+              var base = { observer_lon: +probeAt.ll.lng.toFixed(6), observer_lat: +probeAt.ll.lat.toFixed(6),
+                           eye_height_m: eye, max_distance_m: range, earth_curvature: "included (refraction k = 0.13)" };
+              feats.push({ type: "Feature", geometry: { type: "Point", coordinates: [base.observer_lon, base.observer_lat] },
+                           properties: common(Object.assign({ product: "observer", ground_m: Math.round(probeAt.z * 10) / 10 }, base)) });
+              mask = new Uint8Array(m.near.length); for (k = 0; k < mask.length; k++) mask[k] = m.near[k] >= 2 ? 1 : 0;
+              feats.push({ type: "Feature", geometry: multiPolygon(P.polygonize(mask, st.near)),
+                           properties: common(Object.assign({ product: "visible ground", part: "near", cell_m: st.near.cell }, base)) });
+              mask = new Uint8Array(m.far.length); for (k = 0; k < mask.length; k++) mask[k] = m.far[k] >= 2 ? 1 : 0;
+              feats.push({ type: "Feature", geometry: multiPolygon(P.polygonize(mask, st.far)),
+                           properties: common(Object.assign({ product: "visible ground", part: "far", cell_m: st.far.cell }, base)) });
+              feats.push(boxFeature(st.near, common({ product: "area analysed", part: "near", cell_m: st.near.cell })));
+              finish("lunashade-viewshed-" + probeAt.ll.lat.toFixed(5) + "_" + probeAt.ll.lng.toFixed(5) + "-" + eye + "m.geojson");
+            } catch (e) { fail(e); }
+          });
+        } else msg.textContent = " nothing to export in this mode yet";
+      } catch (e) { fail(e); }
+    }, 20);
+  }
+  $("export").onclick = exportGeoJSON;
 
   function shareSpot() {
     var url = location.href, msg = $("sharemsg");

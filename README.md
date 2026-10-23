@@ -3,7 +3,8 @@
 Sun and shade from the terrain of Tasmania, computed in your browser from the Tasmania 2 m DEM.
 
 **Live:** <https://mdsumner.github.io/lunashade/> - **Notes:** [docs/](docs/index.md) -
-**lunamap fold-in:** [docs/lunamap.md](docs/lunamap.md)
+**lunamap fold-in:** [docs/lunamap.md](docs/lunamap.md) -
+**Checking the DEM COG:** [docs/cog.md](docs/cog.md)
 
 Pan to a place, choose an area and detail (2 km at 2 m up to 16 km at 16 m), and load the terrain. Then:
 
@@ -13,6 +14,9 @@ Pan to a place, choose an area and detail (2 km at 2 m up to 16 km at 16 m), and
   solstices, and first and last direct sun to the minute.
 - **Viewshed**: tap a spot for the ground visible from it (eye 1.5 to 30 m, out to 10, 20 or 40 km), computed
   exactly on a triangulation of the terrain ([method](docs/viewshed.md)).
+- **Download GeoJSON**: what is shown in the loaded area as dissolved polygons in WGS84 lon/lat: shadow
+  at the time, hours of sun in 1-hour bands, or the visible ground (near at full detail, far at 64 m)
+  with the observer point. Each file includes the area analysed and the settings used.
 - **Share a spot**: the address bar always holds the loaded area, date, time and tapped spot, and the
   skyline panel has a Share / Copy link button. Opening the link loads the same terrain and skyline.
 
@@ -29,9 +33,11 @@ A static page (plain HTML, CSS and JavaScript, no build step) on GitHub Pages.
 | `js/worker.js` | holds the terrain and runs the shading off the main thread |
 | `js/engine.js` | the shadow sweep (O(N) per sun position), near/far domain, skyline probe |
 | `js/osvm.js` | the viewshed: an object-space visibility map over the DEM as triangles ([method](docs/viewshed.md)) |
+| `js/polygonize.js` | grid mask to dissolved polygons with holes, along cell edges (for the GeoJSON export) |
 | `js/sun.js` | sun position (NOAA equations) and Hobart local time |
 | `test/test-engine.js` | `node test/test-engine.js`: sweep vs brute force, near/far vs one fine grid, timing |
 | `test/test-osvm.js` | `node test/test-osvm.js`: viewshed vs brute-force line of sight, skyline vs the probe, timing |
+| `test/test-polygonize.js` | `node test/test-polygonize.js`: polygons vs the mask (area, ring orientation, every cell centre) |
 | `test/make_synth.py`, `test/serve.js` | a synthetic MGA zone 55 COG and a range-request server for local testing |
 
 The method is written up in [docs/index.md](docs/index.md). In short: one directional sweep per sun position

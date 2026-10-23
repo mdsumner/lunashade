@@ -244,17 +244,20 @@
     var zEye = zg + eye, sec = makeSectors(S), NS = 4 * S, eps = 1e-3;
     // growable piece store
     var cap = 1 << 16, xy = new Float64Array(cap * 2), nxy = 0, off = [0], tri = [], ringOf = [];
-    var area = 0, nTri = 0, nVis = 0, nHid = 0, curTri = -1, curRing = 0, curSec = null, plA = 0, plB = 0, plC = 0, triVisible = false;
+    var area = 0, nTri = 0, nVis = 0, nHid = 0, nDropped = 0, curTri = -1, curRing = 0, curSec = null, plA = 0, plB = 0, plC = 0, triVisible = false;
     var PU = new Float64Array(16), PV = new Float64Array(16), QX = new Float64Array(8), QY = new Float64Array(8);
-    function back(u, v, k) {        // image point -> plan (relative), into QX/QY[k]
-      var dx = curSec.fx + u * curSec.rx, dy = curSec.fy + u * curSec.ry, den = v - plA * dx - plB * dy;
-      var t = Math.abs(den) < 1e-15 ? 0 : plC / den;
-      if (!(t > 0) || t > 1e7) t = 0;
+    function back(u, v, k) {        // image point -> plan (relative), into QX/QY[k]; false if the ray
+      var dx = curSec.fx + u * curSec.rx, dy = curSec.fy + u * curSec.ry, den = v - plA * dx - plB * dy;   // grazes the plane
+      var t = Math.abs(den) < 1e-15 ? NaN : plC / den;
+      if (!(t > 0) || t > 1e7) return false;
       QX[k] = t * dx; QY[k] = t * dy;
+      return true;
     }
     function emit(n, us, vs, quad, qo) {
       var k, a2 = 0;
-      for (k = 0; k < n; k++) { if (quad) back(quad[qo + 2 * k], quad[qo + 2 * k + 1], k); else back(us[k], vs[k], k); }
+      for (k = 0; k < n; k++) {      // a vertex that cannot be taken back to the ground: drop the piece (no spike to the eye)
+        if (!(quad ? back(quad[qo + 2 * k], quad[qo + 2 * k + 1], k) : back(us[k], vs[k], k))) { nDropped++; return; }
+      }
       for (k = 0; k < n; k++) { var j = k + 1 === n ? 0 : k + 1; a2 += QX[k] * QY[j] - QX[j] * QY[k]; }
       var ar = Math.abs(a2) / 2;
       if (ar < 1e-6) return;
@@ -364,7 +367,7 @@
       sky[az] = v <= NEGV ? -90 : Math.atan(v / Math.sqrt(1 + u * u)) / RAD;
     }
     var nEnv = 0; for (var s2 = 0; s2 < NS; s2++) nEnv += sec[s2].eu.length;
-    return { E: E0, N: N0, zEye: zEye, area: area, nTri: nTri, nVisTri: nVis, nQuickHidden: nHid, envelopePoints: nEnv, ms: Date.now() - t0,
+    return { E: E0, N: N0, zEye: zEye, area: area, nTri: nTri, nVisTri: nVis, nQuickHidden: nHid, nDropped: nDropped, envelopePoints: nEnv, ms: Date.now() - t0,
              pieces: { xy: xy.subarray(0, nxy), off: Uint32Array.from(off), tri: Int32Array.from(tri), ring: Uint8Array.from(ringOf), n: tri.length },
              skyline: sky };
   }

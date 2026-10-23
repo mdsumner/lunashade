@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 importScripts("sun.js", "engine.js", "osvm.js");
 var S = self.LunaSun, E = self.LunaEngine, V = self.LunaOSVM;
-var dom = null, info = null, cancelled = {};
+var dom = null, info = null, cancelled = {}, lastViewRes = null;
 
 function cropTarget(src, T) {   // the area-of-interest window out of a near-grid array
   var w = T.c1 - T.c0, h = T.r1 - T.r0, out = new src.constructor(w * h), W = info.near.w;
@@ -15,7 +15,7 @@ function cropTarget(src, T) {   // the area-of-interest window out of a near-gri
 self.onmessage = function (ev) {
   var m = ev.data;
   if (m.type === "load") {
-    info = m; dom = new E.Domain(m.near, m.far);
+    info = m; dom = new E.Domain(m.near, m.far); lastViewRes = null;
     self.postMessage({ id: m.id, type: "loaded" });
   } else if (m.type === "cancel") {
     cancelled[m.which] = true;
@@ -52,6 +52,7 @@ self.onmessage = function (ev) {
   } else if (m.type === "viewshed") {
     // object-space viewshed from (E, N): near grid then far grid, visible fraction per cell
     var res = V.viewshed([info.near, info.far], m.E, m.N, { eye: m.eye, maxDist: m.maxDist });
+    lastViewRes = res;
     if (!res) { self.postMessage({ id: m.id, type: "viewshed", none: true }); return; }
     var cov = cropTarget(V.coverage(res, info.near, 2, 0), info.target);
     var sky = new Float32Array(360);
@@ -61,6 +62,11 @@ self.onmessage = function (ev) {
     }
     self.postMessage({ id: m.id, type: "viewshed", cov: cov, skyline: sky, area: res.area, nTri: res.nTri,
       nVisTri: res.nVisTri, pieces: res.pieces.n, ms: res.ms, zEye: res.zEye }, [cov.buffer, sky.buffer]);
+  } else if (m.type === "viewexport") {
+    // visible fraction (0..4) of every near cell and every far cell, for the GeoJSON export
+    if (!lastViewRes) { self.postMessage({ id: m.id, type: "viewexport", none: true }); return; }
+    var cn = V.coverage(lastViewRes, info.near, 2, 0), cf = V.coverage(lastViewRes, info.far, 2, 1);
+    self.postMessage({ id: m.id, type: "viewexport", near: cn, far: cf }, [cn.buffer, cf.buffer]);
   } else if (m.type === "horizon") {
     var hz = E.horizon(info.near, info.far, m.E, m.N, 360, m.maxDist || 40000, 1.5);
     if (!hz) { self.postMessage({ id: m.id, type: "horizon", none: true }); return; }

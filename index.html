@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>lunashade - sun and shade from the Tasmania 2 m DEM</title>
+<meta name="description" content="Terrain shadows and hours of sun for any date, computed in your browser from the Tasmania 2 m DEM.">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"></script>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <div class="head">
+    <b>lunashade</b> <span class="sub">terrain sun and shade</span>
+    <button id="collapse" title="Hide or show the panel">-</button>
+  </div>
+  <div id="body">
+    <div class="row">
+      <label for="detail">Area</label>
+      <select id="detail">
+        <option value="2">2 km square at 2 m</option>
+        <option value="4" selected>4 km square at 4 m</option>
+        <option value="8">8 km square at 8 m</option>
+        <option value="16">16 km square at 16 m</option>
+      </select>
+      <button id="load" class="primary">Load terrain here</button>
+    </div>
+    <div id="status" class="status">Pan the map to a place, then <i>Load terrain here</i>. The square is centred on the map.</div>
+    <div class="row">
+      <label for="date">Date</label>
+      <input type="date" id="date">
+      <button class="chip" data-d="06-21">Jun 21</button>
+      <button class="chip" data-d="03-20">Mar 20</button>
+      <button class="chip" data-d="12-21">Dec 21</button>
+    </div>
+    <div class="row">
+      <label for="time">Time</label>
+      <input type="range" id="time" min="240" max="1320" step="5" value="720">
+      <span id="clock" class="mono">12:00</span>
+      <button id="play" title="Play the day">Play</button>
+    </div>
+    <div id="sun" class="status mono"></div>
+    <div class="row">
+      <label>Show</label>
+      <label class="radio"><input type="radio" name="mode" value="shade" checked> shade now</label>
+      <label class="radio"><input type="radio" name="mode" value="hours"> hours of sun</label>
+    </div>
+    <div id="hoursrow" class="row" hidden>
+      <button id="calchours">Calculate hours of sun for the day</button>
+      <select id="step" title="Time step">
+        <option value="20">every 20 min</option>
+        <option value="10" selected>every 10 min</option>
+        <option value="5">every 5 min</option>
+      </select>
+    </div>
+    <div id="legend"></div>
+    <div class="row">
+      <label for="opacity">Opacity</label>
+      <input type="range" id="opacity" min="0.1" max="1" step="0.05" value="0.6">
+    </div>
+    <div id="probe" class="probe" hidden></div>
+    <div class="foot">
+      Tap inside the loaded square for the skyline and sun path at that spot.
+      <a href="docs/">Notes</a> - <a href="docs/lunamap.html">lunamap fold-in</a> -
+      <a href="https://github.com/mdsumner/lunashade">source</a>
+      <div class="credit">Ground only: bare-earth terrain shadows, no trees or buildings.
+      Elevation: Tasmania 2 m DEM, Mineral Resources Tasmania / theLIST (CC BY 3.0 AU), via Source Cooperative.
+      Prototype; not for safety-critical use.</div>
+    </div>
+  </div>
+</div>
+<script src="js/sun.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

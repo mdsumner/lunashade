@@ -11,6 +11,8 @@ Pan to a place, choose an area and detail (2 km at 2 m up to 16 km at 16 m), and
 - **Hours of sun**: hours of direct sun on each cell for the day.
 - **Skyline**: tap a spot for its horizon traced 40 km out, the sun's path for the date and both
   solstices, and first and last direct sun to the minute.
+- **Share a spot**: the address bar always holds the loaded area, date, time and tapped spot, and the
+  skyline panel has a Share / Copy link button. Opening the link loads the same terrain and skyline.
 
 Terrain only: the DEM is bare earth, so there are no trees or buildings. Prototype; not for safety-critical use.
 
@@ -34,7 +36,9 @@ distant ridges (with earth curvature), and the fine grid casts locally.
 
 Run locally with any static server that supports HTTP range requests, for example
 `node test/serve.js . 8765`, then open <http://localhost:8765/>. `?dem=URL` points the page at another COG
-(MGA94 zone 55, metres); `?load=1&detail=4&date=2026-06-21&time=720` loads straight away.
+(MGA94 zone 55, metres). Other query parameters: `at=lat,lon` (centre of the area), `detail` (2, 4, 8 or 16),
+`date`, `time` (minutes after local midnight), `mode=hours`, `probe=lat,lon` (the tapped spot); any of
+`at`, `probe` or `load=1` loads straight away. The hash holds the map view.
 
 ## Data
 

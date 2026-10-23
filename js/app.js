@@ -30,13 +30,15 @@
   base["Topographic (grey)"].addTo(map);
   L.control.layers(base, null, { position: "topleft" }).addTo(map);
   L.control.scale({ imperial: false }).addTo(map);
+  // URL state. Query: at (centre of the loaded square), detail, date, time, mode, probe (tapped
+  // spot), dem; any of at / probe / load=1 loads straight away. Hash: the map view.
+  function llParam(v) { var a = (v || "").split(",").map(Number); return a.length === 2 && a.every(isFinite) ? L.latLng(a[0], a[1]) : null; }
+  var startAt = llParam(Q.get("at")), startProbe = llParam(Q.get("probe"));
   var h = location.hash.replace("#", "").split("/").map(Number);
   if (h.length >= 3 && h.every(isFinite)) map.setView([h[0], h[1]], h[2]);
+  else if (startAt || startProbe) map.setView(startAt || startProbe, 14);
   else map.setView([-42.912, 147.262], 13);    // kunanyi / Fern Tree
-  map.on("moveend", function () {
-    var c = map.getCenter();
-    history.replaceState(null, "", location.pathname + location.search + "#" + c.lat.toFixed(5) + "/" + c.lng.toFixed(5) + "/" + map.getZoom());
-  });
+  map.on("moveend", function () { updateURL(); });
 
   // a Leaflet overlay that shows a <canvas> (SVGOverlay just places the element it is given)
   var CanvasOverlay = L.SVGOverlay.extend({});
@@ -133,7 +135,8 @@
 
   function load() {
     var km = +$("detail").value, cell = km, size = km * 1000, margin = Math.max(1000, size / 4);
-    var c = map.getCenter(), cen = proj4("EPSG:4326", MGA94, [c.lng, c.lat]);
+    var c = loadAt || map.getCenter(), cen = proj4("EPSG:4326", MGA94, [c.lng, c.lat]);
+    loadAt = null;
     var tb = [cen[0] - size / 2, cen[1] - size / 2, cen[0] + size / 2, cen[1] + size / 2];
     var nb = [tb[0] - margin, tb[1] - margin, tb[2] + margin, tb[3] + margin];
     var fb = [cen[0] - FAR_RADIUS, cen[1] - FAR_RADIUS, cen[0] + FAR_RADIUS, cen[1] + FAR_RADIUS];
@@ -152,7 +155,7 @@
       var tz = new Float32Array(tg.w * tg.h);
       for (var y = 0; y < tg.h; y++) tz.set(near.z.subarray((T.r0 + y) * near.w + T.c0, (T.r0 + y) * near.w + T.c1), y * tg.w);
       var ll = proj4(MGA94, "EPSG:4326", cen);
-      st = { tg: tg, tz: tz, lat: ll[1], lon: ll[0], theta: convergence(ll[0], ll[1]), nearCell: near.cell, farCell: far.cell,
+      st = { tg: tg, tz: tz, lat: ll[1], lon: ll[0], detail: $("detail").value, theta: convergence(ll[0], ll[1]), nearCell: near.cell, farCell: far.cell,
              nearLevel: near.level, farLevel: far.level, zmax: zmax };
       buildOverlay();
       var secs = ((performance.now() - t0) / 1000).toFixed(1);
@@ -161,7 +164,8 @@
         status("Loaded " + tg.w + " x " + tg.h + " cells at " + st.nearCell.toFixed(1) + " m, surround at " +
           st.farCell.toFixed(0) + " m, in " + secs + " s. Highest ground in view: " + Math.round(zmax) + " m.");
         $("load").disabled = false;
-        refresh();
+        refresh(); updateURL();
+        if (probeNext) { var pn = probeNext; probeNext = null; probe(pn); }
       });
     }).catch(function (e) {
       console.error(e); $("load").disabled = false;
@@ -307,19 +311,21 @@
 
   // ---- probe: skyline and sun path at a point -----------------------------------------
   var probeAt = null, probeHz = null;
-  map.on("click", function (e) {
+  map.on("click", function (e) { probe(e.latlng); });
+  function probe(latlng) {
     if (!st) return;
-    var q = proj4("EPSG:4326", MGA94, [e.latlng.lng, e.latlng.lat]), tg = st.tg;
+    var q = proj4("EPSG:4326", MGA94, [latlng.lng, latlng.lat]), tg = st.tg;
     var col = Math.floor((q[0] - tg.x0) / tg.cell), row = Math.floor((tg.ytop - q[1]) / tg.cell);
     if (col < 0 || row < 0 || col >= tg.w || row >= tg.h) return;
-    probeAt = { E: q[0], N: q[1], ll: e.latlng, z: st.tz[row * tg.w + col], k: row * tg.w + col };
-    if (probeMarker) probeMarker.setLatLng(e.latlng); else probeMarker = L.circleMarker(e.latlng, { radius: 6, color: "#e65100", weight: 2, fillOpacity: 0.3 }).addTo(map);
+    probeAt = { E: q[0], N: q[1], ll: latlng, z: st.tz[row * tg.w + col], k: row * tg.w + col };
+    updateURL();
+    if (probeMarker) probeMarker.setLatLng(latlng); else probeMarker = L.circleMarker(latlng, { radius: 6, color: "#e65100", weight: 2, fillOpacity: 0.3 }).addTo(map);
     $("probe").hidden = false; $("probe").innerHTML = "Tracing the skyline ...";
     ask({ type: "horizon", E: q[0], N: q[1], maxDist: FAR_RADIUS }).then(function (m) {
       if (m.none) { $("probe").innerHTML = "Outside the loaded terrain."; return; }
       probeHz = m.angles; drawProbe();
     });
-  });
+  }
   function sunDay(d, lat, lon, hz) {
     var pts = [], first = null, last = null, total = 0;
     for (var m = 0; m < 1440; m++) {
@@ -363,18 +369,40 @@
       "<div><span style='color:#e65100'>&#9644;</span> " + d + ": " + fmt(today) + "</div>" +
       "<div><span style='color:#1e88e5'>- -</span> Jun 21: " + fmt(win) + "</div>" +
       "<div><span style='color:#f9a825'>- -</span> Dec 21: " + fmt(sum) + "</div>" +
+      "<div class='row'><button id='sharelink'>" + (navigator.share ? "Share" : "Copy") + " a link to this spot</button><span id='sharemsg' class='status'></span></div>" +
       "<div class='status'>Skyline traced " + (FAR_RADIUS / 1000) + " km out from 1.5 m above the ground, with earth curvature; terrain only.</div>";
   }
 
+  function shareSpot() {
+    var url = location.href, msg = $("sharemsg");
+    if (navigator.share) { navigator.share({ title: "lunashade: sun at this spot", url: url }).catch(function () {}); return; }
+    (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(function () {
+      msg.textContent = " copied";
+    }).catch(function () { window.prompt("Copy this link:", url); });
+  }
+  document.addEventListener("click", function (e) { if (e.target && e.target.id === "sharelink") shareSpot(); });
+
   // ---- controls ------------------------------------------------------------------
+  function updateURL() {
+    var p = new URLSearchParams();
+    if (Q.get("dem")) p.set("dem", Q.get("dem"));
+    if (st) { p.set("at", st.lat.toFixed(5) + "," + st.lon.toFixed(5)); p.set("detail", st.detail); }
+    p.set("date", dateStr()); p.set("time", String(minutes()));
+    if (mode() === "hours") p.set("mode", "hours");
+    if (probeAt) p.set("probe", probeAt.ll.lat.toFixed(6) + "," + probeAt.ll.lng.toFixed(6));
+    var c = map.getCenter();
+    history.replaceState(null, "", location.pathname + "?" + p.toString().replace(/%2C/g, ",") +
+      "#" + c.lat.toFixed(5) + "/" + c.lng.toFixed(5) + "/" + map.getZoom());
+  }
+  var loadAt = startAt, probeNext = startProbe;
   $("load").onclick = load;
-  $("time").oninput = refresh;
-  $("date").onchange = function () { hours = null; refresh(); drawProbe(); };
+  $("time").oninput = function () { refresh(); updateURL(); };
+  $("date").onchange = function () { hours = null; refresh(); drawProbe(); updateURL(); };
   Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (b) {
-    b.onclick = function () { $("date").value = dateStr().slice(0, 4) + "-" + b.dataset.d; hours = null; refresh(); drawProbe(); };
+    b.onclick = function () { $("date").value = dateStr().slice(0, 4) + "-" + b.dataset.d; hours = null; refresh(); drawProbe(); updateURL(); };
   });
   Array.prototype.forEach.call(document.querySelectorAll("input[name=mode]"), function (r) {
-    r.onchange = function () { $("hoursrow").hidden = mode() !== "hours"; refresh(); };
+    r.onchange = function () { $("hoursrow").hidden = mode() !== "hours"; refresh(); updateURL(); };
   });
   $("calchours").onclick = calcHours;
   $("opacity").oninput = function () { if (overlay) overlay.setOpacity(+$("opacity").value); };
@@ -384,12 +412,12 @@
     if (playTimer) { clearInterval(playTimer); playTimer = null; $("play").textContent = "Play"; return; }
     $("play").textContent = "Stop";
     playTimer = setInterval(function () {
-      var t = minutes() + 10; if (t > 1320) t = 240; $("time").value = t; refresh();
+      var t = minutes() + 10; if (t > 1320) t = 240; $("time").value = t; refresh(); updateURL();
     }, 250);
   };
   if (Q.get("detail")) $("detail").value = Q.get("detail");
   if (Q.get("mode") === "hours") { document.querySelector("input[name=mode][value=hours]").checked = true; $("hoursrow").hidden = false; }
   showSun();
-  if (Q.get("load")) load();
+  if (Q.get("load") || startAt || startProbe) load();
   window.lunashade = { map: map, state: function () { return st; }, load: load, calcHours: calcHours };
 })();

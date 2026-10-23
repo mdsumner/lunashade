@@ -1,0 +1,142 @@
+// node test/test-osvm.js : check the object-space viewshed (js/osvm.js) against
+// brute-force line of sight on the same TIN, its skyline against engine.horizon(),
+// and time it.
+var O = require("../js/osvm.js"), E = require("../js/engine.js");
+
+function terrain(w, h, cell, x0, ytop, seed) {
+  var z = new Float32Array(w * h), s0 = seed || 0;
+  var hills = [[0.3, 0.35, 900, 0.10], [0.7, 0.6, 600, 0.06], [0.5, 0.8, 300, 0.03], [0.15, 0.8, 400, 0.02]];
+  for (var r = 0; r < h; r++) for (var c = 0; c < w; c++) {
+    var u = c / w, v = r / h, s = 50 + 30 * Math.sin(u * 40 + s0) * Math.cos(v * 33) + 8 * Math.sin(u * 170) * Math.sin(v * 150 + s0);
+    hills.forEach(function (k) { var d2 = (u - k[0]) * (u - k[0]) + (v - k[1]) * (v - k[1]); s += k[2] * Math.exp(-d2 / (2 * k[3] * k[3])); });
+    z[r * w + c] = s;
+  }
+  return { z: z, w: w, h: h, cell: cell, x0: x0 || 0, ytop: ytop || h * cell };
+}
+
+// line of sight from (E0, N0, zEye) to the TIN point at (E1, N1); returns the largest
+// amount the terrain rises above the sight line (negative: clear)
+function losMargin(g, E0, N0, zEye, E1, N1) {
+  var z1 = O.sampleTIN(g, E1, N1), dx = E1 - E0, dy = N1 - N0, d = Math.sqrt(dx * dx + dy * dy);
+  var n = Math.ceil(d / (g.cell / 16)), worst = -1e9;
+  for (var i = 1; i < n; i++) {
+    var t = i / n;
+    if (d * (1 - t) < g.cell * 0.05) break;
+    var zz = O.sampleTIN(g, E0 + t * dx, N0 + t * dy);
+    if (zz === null) continue;
+    var m = zz - (zEye + t * (z1 - zEye));
+    if (m > worst) worst = m;
+  }
+  return worst;
+}
+
+function pointInPieces(res, list, x, y) {
+  var P = res.pieces, xy = P.xy;
+  for (var q = 0; q < list.length; q++) {
+    var p = list[q], a = P.off[p], b = P.off[p + 1], s = 0, i;
+    for (i = a; i < b; i++) { var j = i + 1 === b ? a : i + 1; s += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+    var sg = s >= 0 ? 1 : -1, inside = true;
+    for (i = a; i < b && inside; i++) {
+      var j2 = i + 1 === b ? a : i + 1;
+      var cr = (xy[2 * j2] - xy[2 * i]) * (y - xy[2 * i + 1]) - (xy[2 * j2 + 1] - xy[2 * i + 1]) * (x - xy[2 * i]);
+      if (cr * sg < -1e-7) inside = false;
+    }
+    if (inside) return true;
+  }
+  return false;
+}
+function triOf(g, x, y) {
+  var u = (x - g.x0) / g.cell - 0.5, v = (g.ytop - y) / g.cell - 0.5, c = Math.floor(u), r = Math.floor(v);
+  return (r * (g.w - 1) + c) * 2 + ((u - c) >= (v - r) ? 0 : 1);
+}
+
+var fails = 0, rnd = (function () { var s = 12345; return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; })();
+
+// 1. against brute force, several observers, no curvature
+var g = terrain(240, 220, 10, 500000, 5250000, 0);
+[[0.5, 0.5, 1.5], [0.2, 0.7, 1.5], [0.8, 0.25, 10], [0.31, 0.36, 2]].forEach(function (o) {
+  var E0 = g.x0 + o[0] * g.w * g.cell, N0 = g.ytop - o[1] * g.h * g.cell;
+  var res = O.viewshed([g], E0, N0, { eye: o[2], curvature: false });
+  var byTri = {};
+  for (var p = 0; p < res.pieces.n; p++) (byTri[res.pieces.tri[p]] = byTri[res.pieces.tri[p]] || []).push(p);
+  var n = 0, agree = 0, edge = 0, nvis = 0, visAgree = 0;
+  for (var k = 0; k < 3000; k++) {
+    var x = g.x0 + g.cell * (0.6 + rnd() * (g.w - 2.2)), y = g.ytop - g.cell * (0.6 + rnd() * (g.h - 2.2));
+    var m = losMargin(g, E0, N0, res.zEye, x, y);
+    if (Math.abs(m) < 0.05) { edge++; continue; }
+    var bv = m < 0, ov = pointInPieces(res, byTri[triOf(g, x, y)] || [], x, y);
+    n++; if (bv === ov) agree++; if (bv) { nvis++; if (ov) visAgree++; }
+  }
+  var pct = 100 * agree / n;
+  console.log("observer " + o.join(",") + ": " + res.nTri + " triangles, " + res.pieces.n + " pieces, " + res.envelopePoints +
+    " envelope points, " + res.ms + " ms; agreement with brute LOS " + pct.toFixed(2) + "% of " + n + " (visible " +
+    (100 * nvis / n).toFixed(1) + "%, of which found " + (100 * visAgree / nvis).toFixed(1) + "%; " + edge + " grazing skipped)");
+  if (pct < 99.5) fails++;
+});
+
+// 2. curvature: the same comparison with heights lowered by d^2 / 2R at the vertices
+var gc = terrain(300, 300, 64, 480000, 5280000, 1);
+(function () {
+  var E0 = gc.x0 + 0.5 * gc.w * gc.cell, N0 = gc.ytop - 0.5 * gc.h * gc.cell;
+  var res = O.viewshed([gc], E0, N0, { eye: 1.5 });
+  // the brute check runs on a copy with the curvature drop baked into the vertices
+  var z2 = new Float32Array(gc.z);
+  for (var r = 0; r < gc.h; r++) for (var c = 0; c < gc.w; c++) {
+    var dx = gc.x0 + (c + 0.5) * gc.cell - E0, dy = gc.ytop - (r + 0.5) * gc.cell - N0;
+    z2[r * gc.w + c] -= (dx * dx + dy * dy) / (2 * O.R_EFF);
+  }
+  var g2 = { z: z2, w: gc.w, h: gc.h, cell: gc.cell, x0: gc.x0, ytop: gc.ytop };
+  var byTri = {};
+  for (var p = 0; p < res.pieces.n; p++) (byTri[res.pieces.tri[p]] = byTri[res.pieces.tri[p]] || []).push(p);
+  var n = 0, agree = 0;
+  for (var k = 0; k < 2000; k++) {
+    var x = gc.x0 + gc.cell * (0.6 + rnd() * (gc.w - 2.2)), y = gc.ytop - gc.cell * (0.6 + rnd() * (gc.h - 2.2));
+    var m = losMargin(g2, E0, N0, res.zEye, x, y);
+    if (Math.abs(m) < 0.05) continue;
+    n++; if ((m < 0) === pointInPieces(res, byTri[triOf(gc, x, y)] || [], x, y)) agree++;
+  }
+  console.log("curvature, 19 km square at 64 m: agreement " + (100 * agree / n).toFixed(2) + "% of " + n + ", " + res.ms + " ms");
+  if (agree / n < 0.995) fails++;
+})();
+
+// 3. near + far rings, and the skyline against engine.horizon() (bilinear, ray-marched)
+var fine = terrain(800, 800, 10, 0, 8000, 2);
+function sub(g, c0, r0, w, h) {
+  var z = new Float32Array(w * h);
+  for (var r = 0; r < h; r++) for (var c = 0; c < w; c++) z[r * w + c] = g.z[(r0 + r) * g.w + c0 + c];
+  return { z: z, w: w, h: h, cell: g.cell, x0: g.x0 + c0 * g.cell, ytop: g.ytop - r0 * g.cell };
+}
+function coarsen(g, f) {
+  var w = Math.floor(g.w / f), h = Math.floor(g.h / f), z = new Float32Array(w * h);
+  for (var r = 0; r < h; r++) for (var c = 0; c < w; c++) {
+    var s = 0; for (var a = 0; a < f; a++) for (var b = 0; b < f; b++) s += g.z[(r * f + a) * g.w + c * f + b];
+    z[r * w + c] = s / (f * f);
+  }
+  return { z: z, w: w, h: h, cell: g.cell * f, x0: g.x0, ytop: g.ytop };
+}
+(function () {
+  var near = sub(fine, 300, 300, 200, 200), far = coarsen(fine, 8);
+  var E0 = near.x0 + 100 * 10 + 3, N0 = near.ytop - 100 * 10 - 7;
+  var two = O.viewshed([near, far], E0, N0, { eye: 1.5 });
+  var hz = E.horizon(near, far, E0, N0, 360, 20000, 1.5);
+  var dsum = 0, dmax = 0;
+  for (var a = 0; a < 360; a++) { var d = Math.abs(two.skyline[a] - hz.angles[a]); dsum += d; if (d > dmax) dmax = d; }
+  console.log("near+far: " + two.nTri + " triangles in " + two.ms + " ms, visible " + (two.area / 1e6).toFixed(2) +
+    " km2; skyline vs engine.horizon: mean " + (dsum / 360).toFixed(3) + " deg, max " + dmax.toFixed(3) + " deg");
+  if (dsum / 360 > 0.25) fails++;
+  var cov = O.coverage(two, near, 2, 0), s = 0;
+  for (var i = 0; i < cov.length; i++) s += cov[i];
+  console.log("coverage on the near grid: " + (100 * s / (4 * cov.length)).toFixed(1) + "% of samples visible");
+})();
+
+// 4. timing at app sizes: 1000 x 1000 near at 4 m, far 1250 x 1250 at 64 m
+(function () {
+  var near = terrain(1000, 1000, 4, 0, 4000, 3), far = terrain(1250, 1250, 64, -38000, 42000, 3);
+  var res = O.viewshed([near, far], 2000, 2000, { eye: 1.5 });
+  console.log("app size (1000^2 at 4 m + 1250^2 at 64 m): " + res.nTri + " triangles, " + res.pieces.n + " pieces, " +
+    res.envelopePoints + " envelope points, " + res.nQuickHidden + " rejected early, " + res.ms + " ms");
+  var r2 = O.viewshed([near, far], 2000, 2000, { eye: 1.5, maxDist: 20000 });
+  console.log("  same, maxDist 20 km: " + r2.nTri + " triangles, " + r2.ms + " ms");
+})();
+
+if (fails) { console.log(fails + " FAIL"); process.exit(1); } else console.log("all ok");

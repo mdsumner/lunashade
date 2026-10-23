@@ -1,9 +1,9 @@
 // lunashade - worker.js: holds the loaded terrain and runs the shading off the
-// main thread. Messages in: load, shade, sunhours, horizon. Messages out carry
-// the same `id` back.
+// main thread. Messages in: load, shade, sunhours, horizon, viewshed. Messages out
+// carry the same `id` back.
 // ---------------------------------------------------------------------------
-importScripts("sun.js", "engine.js");
-var S = self.LunaSun, E = self.LunaEngine;
+importScripts("sun.js", "engine.js", "osvm.js");
+var S = self.LunaSun, E = self.LunaEngine, V = self.LunaOSVM;
 var dom = null, info = null, cancelled = {};
 
 function cropTarget(src, T) {   // the area-of-interest window out of a near-grid array
@@ -49,6 +49,18 @@ self.onmessage = function (ev) {
         self.postMessage({ id: m.id, type: "sunhours", hours: acc, daylight: daylight / 60 }, [acc.buffer]);
       }
     })();
+  } else if (m.type === "viewshed") {
+    // object-space viewshed from (E, N): near grid then far grid, visible fraction per cell
+    var res = V.viewshed([info.near, info.far], m.E, m.N, { eye: m.eye, maxDist: m.maxDist });
+    if (!res) { self.postMessage({ id: m.id, type: "viewshed", none: true }); return; }
+    var cov = cropTarget(V.coverage(res, info.near, 2, 0), info.target);
+    var sky = new Float32Array(360);
+    for (var a2 = 0; a2 < 360; a2++) {
+      var g2 = ((a2 + info.theta) % 360 + 360) % 360, j0 = Math.floor(g2), f2 = g2 - j0;
+      sky[a2] = res.skyline[j0 % 360] * (1 - f2) + res.skyline[(j0 + 1) % 360] * f2;
+    }
+    self.postMessage({ id: m.id, type: "viewshed", cov: cov, skyline: sky, area: res.area, nTri: res.nTri,
+      nVisTri: res.nVisTri, pieces: res.pieces.n, ms: res.ms, zEye: res.zEye }, [cov.buffer, sky.buffer]);
   } else if (m.type === "horizon") {
     var hz = E.horizon(info.near, info.far, m.E, m.N, 360, m.maxDist || 40000, 1.5);
     if (!hz) { self.postMessage({ id: m.id, type: "horizon", none: true }); return; }

@@ -36,9 +36,38 @@
   var startAt = llParam(Q.get("at")), startProbe = llParam(Q.get("probe"));
   var h = location.hash.replace("#", "").split("/").map(Number);
   if (h.length >= 3 && h.every(isFinite)) map.setView([h[0], h[1]], h[2]);
-  else if (startAt || startProbe) map.setView(startAt || startProbe, 14);
+  else if (startAt || startProbe) centreVisible(startAt || startProbe, 14);
   else map.setView([-42.912, 147.262], 13);    // kunanyi / Fern Tree
   map.on("moveend", function () { updateURL(); });
+
+  // The panel covers part of the map (the right side on a wide screen, the bottom on a phone).
+  // "The middle of the map" means the middle of the part you can see.
+  function visibleCentrePoint() {
+    var mr = map.getContainer().getBoundingClientRect(), pr = $("panel").getBoundingClientRect();
+    var x0 = 0, x1 = mr.width, y0 = 0, y1 = mr.height;
+    if (pr.width > 0 && pr.height > 0) {
+      if (pr.width > mr.width * 0.8) y1 = Math.max(80, pr.top - mr.top);   // bottom sheet
+      else x1 = Math.max(80, pr.left - mr.left);                             // side panel
+    }
+    return L.point((x0 + x1) / 2, (y0 + y1) / 2);
+  }
+  function viewCentre() { return map.containerPointToLatLng(visibleCentrePoint()); }
+  function centreVisible(latlng, zoom) {
+    map.setView(latlng, zoom, { animate: false });
+    var off = visibleCentrePoint().subtract(map.getSize().divideBy(2));
+    map.panBy(off.multiplyBy(-1), { animate: false });
+  }
+  // dashed preview of the square "Load terrain here" will read
+  var preview = L.polygon([], { color: "#555", weight: 1.5, dashArray: "2 5", fill: false, interactive: false }).addTo(map);
+  function squareLatLngs(c, size) {
+    var cen = proj4("EPSG:4326", MGA94, [c.lng, c.lat]), h2 = size / 2;
+    return [[-1, 1], [1, 1], [1, -1], [-1, -1]].map(function (k) {
+      var ll = proj4(MGA94, "EPSG:4326", [cen[0] + k[0] * h2, cen[1] + k[1] * h2]); return [ll[1], ll[0]];
+    });
+  }
+  function updatePreview() { preview.setLatLngs(squareLatLngs(viewCentre(), +$("detail").value * 1000)); }
+  map.on("move resize", updatePreview);
+  window.addEventListener("resize", updatePreview);
 
   // a Leaflet overlay that shows a <canvas> (SVGOverlay just places the element it is given)
   var CanvasOverlay = L.SVGOverlay.extend({});
@@ -125,7 +154,7 @@
 
   $("date").value = Q.get("date") || S.hobartDateString(Date.now());
   (function () { var now = new Date(), off = S.hobartOffset(now.getTime()); var m = Math.round(((now.getTime() / 60000 + off) % 1440 + 1440) % 1440 / 5) * 5;
-    $("time").value = Q.get("time") ? +Q.get("time") : Math.max(240, Math.min(1320, m)); })();
+    $("time").value = Q.get("time") ? +Q.get("time") : (m < 420 || m > 1200 ? 720 : m); })();   // at night, start at noon
 
   // grid azimuth of true north at a point (meridian convergence), degrees
   function convergence(lon, lat) {
@@ -135,7 +164,7 @@
 
   function load() {
     var km = +$("detail").value, cell = km, size = km * 1000, margin = Math.max(1000, size / 4);
-    var c = loadAt || map.getCenter(), cen = proj4("EPSG:4326", MGA94, [c.lng, c.lat]);
+    var c = loadAt || viewCentre(), cen = proj4("EPSG:4326", MGA94, [c.lng, c.lat]);
     loadAt = null;
     var tb = [cen[0] - size / 2, cen[1] - size / 2, cen[0] + size / 2, cen[1] + size / 2];
     var nb = [tb[0] - margin, tb[1] - margin, tb[2] + margin, tb[3] + margin];
@@ -156,13 +185,14 @@
       for (var y = 0; y < tg.h; y++) tz.set(near.z.subarray((T.r0 + y) * near.w + T.c0, (T.r0 + y) * near.w + T.c1), y * tg.w);
       var ll = proj4(MGA94, "EPSG:4326", cen);
       st = { tg: tg, tz: tz, lat: ll[1], lon: ll[0], detail: $("detail").value, theta: convergence(ll[0], ll[1]), nearCell: near.cell, farCell: far.cell,
-             nearLevel: near.level, farLevel: far.level, zmax: zmax };
+             nearLevel: near.level, farLevel: far.level, farBlock: far.block, zmax: zmax };
       buildOverlay();
       var secs = ((performance.now() - t0) / 1000).toFixed(1);
       return ask({ type: "load", near: near, far: far, target: T, lat: st.lat, lon: st.lon, theta: st.theta },
                  [near.z.buffer, far.z.buffer]).then(function () {
         status("Loaded " + tg.w + " x " + tg.h + " cells at " + st.nearCell.toFixed(1) + " m, surround at " +
-          st.farCell.toFixed(0) + " m, in " + secs + " s. Highest ground in view: " + Math.round(zmax) + " m.");
+          st.farCell.toFixed(0) + " m, in " + secs + " s. Highest ground in view: " + Math.round(zmax) + " m." +
+          " <span style='color:#888'>(COG overview " + st.nearLevel + " / " + st.farLevel + (st.farBlock > 1 ? ", averaged x" + st.farBlock : "") + ")</span>");
         $("load").disabled = false;
         refresh(); updateURL();
         if (probeNext) { var pn = probeNext; probeNext = null; probe(pn); }
@@ -396,6 +426,7 @@
   }
   var loadAt = startAt, probeNext = startProbe;
   $("load").onclick = load;
+  $("detail").onchange = updatePreview;
   $("time").oninput = function () { refresh(); updateURL(); };
   $("date").onchange = function () { hours = null; refresh(); drawProbe(); updateURL(); };
   Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (b) {
@@ -406,7 +437,7 @@
   });
   $("calchours").onclick = calcHours;
   $("opacity").oninput = function () { if (overlay) overlay.setOpacity(+$("opacity").value); };
-  $("collapse").onclick = function () { var p = $("panel"); p.classList.toggle("collapsed"); $("collapse").textContent = p.classList.contains("collapsed") ? "+" : "-"; };
+  $("collapse").onclick = function () { var p = $("panel"); p.classList.toggle("collapsed"); $("collapse").textContent = p.classList.contains("collapsed") ? "+" : "-"; updatePreview(); };
   var playTimer = null;
   $("play").onclick = function () {
     if (playTimer) { clearInterval(playTimer); playTimer = null; $("play").textContent = "Play"; return; }
@@ -417,7 +448,7 @@
   };
   if (Q.get("detail")) $("detail").value = Q.get("detail");
   if (Q.get("mode") === "hours") { document.querySelector("input[name=mode][value=hours]").checked = true; $("hoursrow").hidden = false; }
-  showSun();
+  showSun(); updatePreview();
   if (Q.get("load") || startAt || startProbe) load();
   window.lunashade = { map: map, state: function () { return st; }, load: load, calcHours: calcHours };
 })();

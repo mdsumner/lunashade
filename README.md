@@ -4,7 +4,8 @@ Sun and shade from the terrain of Tasmania, computed in your browser from the Ta
 
 **Live:** <https://mdsumner.github.io/lunashade/> - **Notes:** [docs/](docs/index.md) -
 **lunamap fold-in:** [docs/lunamap.md](docs/lunamap.md) -
-**Checking the DEM COG:** [docs/cog.md](docs/cog.md)
+**Checking the DEM COG:** [docs/cog.md](docs/cog.md) -
+**Hobart vignette:** [docs/hobart.html](https://mdsumner.github.io/lunashade/docs/hobart.html)
 
 Pan to a place, choose an area and detail (2 km at 2 m up to 16 km at 16 m), and load the terrain. Then:
 
@@ -33,10 +34,14 @@ A static page (plain HTML, CSS and JavaScript, no build step) on GitHub Pages.
 | `js/worker.js` | holds the terrain and runs the shading off the main thread |
 | `js/engine.js` | the shadow sweep (O(N) per sun position), near/far domain, skyline probe |
 | `js/osvm.js` | the viewshed: an object-space visibility map over the DEM as triangles ([method](docs/viewshed.md)) |
+| `js/dem.js` | reading MGA grids from the DEM COG with geotiff.js, with request counting (shared by both pages) |
+| `js/align.js` | when the sun passes behind a peak from a spot: closed-form geometry, no DEM |
+| `js/hobart.js`, `docs/hobart.html` | the Hobart vignette: predictions to check over the coming weeks |
 | `js/polygonize.js` | grid mask to dissolved polygons with holes, along cell edges (for the GeoJSON export) |
 | `js/sun.js` | sun position (NOAA equations) and Hobart local time |
 | `test/test-engine.js` | `node test/test-engine.js`: sweep vs brute force, near/far vs one fine grid, timing |
 | `test/test-osvm.js` | `node test/test-osvm.js`: viewshed vs brute-force line of sight, skyline vs the probe, timing |
+| `test/test-align.js` | `node test/test-align.js`: the closed-form summit dates against a minute-by-minute search |
 | `test/test-polygonize.js` | `node test/test-polygonize.js`: polygons vs the mask (area, ring orientation, every cell centre) |
 | `test/make_synth.py`, `test/serve.js` | a synthetic MGA zone 55 COG and a range-request server for local testing |
 

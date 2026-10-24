@@ -4,6 +4,10 @@ Musings and working notes behind the [lunashade prototype](../). It answers one 
 sun reach the ground, and for how long, given the shape of the land? Everything is computed in the browser
 from the Tasmania 2 m DEM.
 
+**Hobart, the mountain and the evening sun**: a [vignette with predictions you can check over the
+coming weeks](hobart.html) (the evening the sun passes behind the summit of kunanyi from your spot, and
+when direct sun leaves your street), with the practicalities and limits of the data and method.
+
 ## Why build one
 
 Global web shade simulators already exist, and they are good for "will the backyard get sun at 3 pm".
@@ -137,6 +141,7 @@ better thing to publish, keeping the horizon stack as the source to recompute th
 
 ## Testing
 
+- `node test/test-align.js` checks the "sun behind the summit" dates against a minute-by-minute search.
 - `node test/test-polygonize.js` checks the GeoJSON polygons against the grid they came from.
 - `node test/test-osvm.js` checks the viewshed against brute-force line of sight on the same TIN, and its
   skyline against the probe.

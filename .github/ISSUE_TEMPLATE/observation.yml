@@ -1,0 +1,52 @@
+name: Observation
+description: Something you saw that lunashade predicts (sun behind the summit, last or first sun at a spot, a shadow edge)
+title: "[observation] "
+labels: ["observation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for checking. Please never look straight at the sun; a phone photo or video of the moment is the best record.
+  - type: dropdown
+    id: what
+    attributes:
+      label: What did you observe?
+      options:
+        - The sun passing behind the summit of kunanyi
+        - Last direct sun at a spot (evening)
+        - First direct sun at a spot (morning)
+        - A shadow edge at a time
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where you stood
+      description: Latitude, longitude (decimal degrees), or a lunashade link to the spot.
+      placeholder: "-42.88400, 147.33200"
+    validations:
+      required: true
+  - type: input
+    id: standing
+    attributes:
+      label: What you stood on, and eye height
+      placeholder: "footpath, eyes about 1.6 m above it"
+  - type: input
+    id: when
+    attributes:
+      label: Date and time (Hobart local), to the minute
+      description: Say which moment, e.g. "centre on the summit", "first touch", "last sliver gone".
+      placeholder: "2026-10-31 19:21, last sliver gone"
+    validations:
+      required: true
+  - type: input
+    id: predicted
+    attributes:
+      label: What lunashade predicted
+      placeholder: "19:23, or paste the card text"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Conditions and notes
+      description: Cloud, haze, smoke; whether the skyline was the mountain or a tree, roof or nearer hill; a photo link if you have one.

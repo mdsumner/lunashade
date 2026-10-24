@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hobart, the mountain and the evening sun: things to check in the next eight weeks</title>
+<meta name="description" content="When the sun passes behind the summit of kunanyi from your spot, and when it leaves your street: predictions for Hobart for the coming weeks, and how far to trust them.">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"></script>
+<style>
+  body { margin: 0; font: 16px/1.55 Georgia, "Times New Roman", serif; color: #222; background: #fbfaf7; }
+  article { max-width: 760px; margin: 0 auto; padding: 18px 18px 60px; }
+  h1 { font: 600 28px/1.25 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 18px 0 8px; }
+  h2 { font: 600 21px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 34px 0 8px; }
+  h3 { font: 600 17px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 22px 0 6px; }
+  .lede { font-size: 18px; color: #333; }
+  .map { height: 440px; border-radius: 6px; margin: 10px 0 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+  .controls, .legend, .small, .card, .status, .legendrow, #chart3 { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+  .controls button, .controls input { font: inherit; padding: 5px 10px; border: 1px solid #bbb; border-radius: 5px; background: #fff; cursor: pointer; }
+  .controls button.primary { background: #4a3a8c; color: #fff; border-color: #4a3a8c; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .legend .bar { height: 10px; border-radius: 2px; }
+  .legend .ticks { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: #555; }
+  .sw { display: inline-block; width: 14px; height: 10px; margin-right: 4px; vertical-align: middle; border-radius: 2px; }
+  .card { background: #fff; border: 1px solid #ddd; border-left: 4px solid #e65100; border-radius: 4px; padding: 10px 12px; margin: 10px 0; }
+  .card ul { margin: 6px 0; padding-left: 20px; }
+  .small { font-size: 13px; color: #555; }
+  .status { color: #444; font-size: 13px; margin: 4px 0; }
+  .legendrow .lg { margin-right: 12px; white-space: nowrap; }
+  #chart3 svg { width: 100%; height: auto; background: #fff; border-radius: 4px; }
+  .datelabel { font: 600 12px system-ui, sans-serif; color: #111; background: rgba(255,255,255,0.85); padding: 1px 4px; border-radius: 3px; white-space: nowrap; }
+  .lunashade-overlay { image-rendering: pixelated; }
+  .warn { background: #fff4e5; border-left: 4px solid #e65100; padding: 8px 12px; font: 14px/1.45 system-ui, sans-serif; }
+  table { border-collapse: collapse; font: 14px/1.4 system-ui, sans-serif; margin: 8px 0; }
+  td, th { border-bottom: 1px solid #e3e3e3; padding: 4px 10px 4px 0; text-align: left; }
+  footer { margin-top: 40px; font: 13px/1.45 system-ui, sans-serif; color: #666; }
+  code { font-size: 14px; }
+</style>
+</head>
+<body>
+<article>
+<p class="small"><a href="../">lunashade</a> / <a href="./">notes</a> / Hobart</p>
+<h1>Hobart, the mountain and the evening sun</h1>
+<p class="lede">Hobart sits at the eastern foot of kunanyi / Mount Wellington, 1271 m high and only seven to
+twelve kilometres from most of the city. For much of the year the evening sun goes down behind the mountain
+long before it would set on a flat horizon. Over the next eight weeks, as the summer solstice approaches,
+the sun sets a little further south each evening, and that makes two things easy to check from your own
+street.</p>
+
+<div class="warn">Never look straight at the sun, even when it is low and dimmed, and not through
+binoculars or a camera viewfinder. Watch the light on the ground, the shadow edge, or your phone's screen.</div>
+
+<h2 id="check">1. The evening the sun goes behind the summit</h2>
+<p>From any spot east of the mountain, the summit sits at a fixed direction and height in the sky. The sun's
+evening path crosses that exact point on just one or two evenings either side of the summer solstice: once in
+late spring, as sunsets move south, and once in late summer, as they move back north. On those evenings you
+can watch the sun's disk slide down behind the summit itself.</p>
+<p>This prediction needs no elevation model at all, only the summit's position and height, where you stand, and
+the sun. So it tests the sun position, the timekeeping, refraction and the earth's curvature separately from
+the terrain data.</p>
+<p>The coloured band shows where each evening of the next eight weeks lands, assuming you stand at sea level. The
+band moves north across the city: around the waterfront and Bellerive at the end of October, Rosny in early
+November, Montagu Bay late in November, North Hobart and Rose Bay in early December. North of the grey edge
+(New Town, Moonah, Lindisfarne, Geilston Bay) the summit lies further south than the sun ever sets, so it
+never happens. Those suburb dates are rough. <b>Tap the map, or use your location, for your exact spot</b>:
+over seven to twelve kilometres a hundred metres north or south moves the date by a day or two, though your
+height matters much less (the card works out both for your spot).</p>
+<div class="controls">
+  <button id="locate" class="primary">Use my location</button>
+  <span class="small">or tap the map</span>
+</div>
+<div id="map1" class="map"></div>
+<div id="legend1" class="legend"></div>
+<div id="card1" class="card" hidden></div>
+<p class="small">The calculation is for the summit ground (1271 m). The broadcast tower beside the summit stands
+about 130 m higher. From the city that is roughly one more degree up, so the sun touches the tower first, by a
+few minutes, if the tower is in line. The card checks whether bare ground hides the summit from your spot.
+Trees and buildings are not in the data.</p>
+
+<h2>2. When the sun leaves your street</h2>
+<p>The second check uses the terrain. For a chosen evening, the map shows the last minute of direct sun on the
+ground across the city, with the shadow of kunanyi and its foothills moving east as the sun goes down. Areas
+close under the mountain, such as Fern Tree, South Hobart and Lenah Valley, lose the sun hours before the
+eastern shore. The page reads the Tasmania 2 m DEM directly from its cloud-optimised file, at 16 m for the
+city and 64 m for 40 km around it. That is roughly 10 to 20 MB to download, and some seconds of computing.</p>
+<div class="controls">
+  <label class="small" for="date2">Evening</label> <input type="date" id="date2">
+  <button id="go2" class="primary">Load terrain and map the evening</button>
+</div>
+<div id="status2" class="status"></div>
+<div id="map2" class="map"></div>
+<div id="legend2" class="legend"></div>
+
+<h2>3. Last sun over the coming weeks</h2>
+<p>For a single spot, the page traces the skyline in every direction (40 km out, with curvature). Then for each
+evening of the next eight weeks it finds the last minute the sun is above that skyline. The dashed line is
+sunset on a flat horizon for comparison. The gap between them is the mountain's share of your evening. Tap the
+map above to add your own spots; the starting examples are rough positions.</p>
+<div class="controls"><button id="go3">Add the example spots</button></div>
+<div id="chart3"></div>
+
+<h2>How to check, in practice</h2>
+<ul>
+  <li><b>Where you stand, exactly.</b> Use the location button, or drop a pin in a map app, and note what you
+  are standing on (beach, footpath, deck) and roughly how high your eyes are above the ground.</li>
+  <li><b>The time, to the minute.</b> Phone clocks are set from the network and are good to well under a
+  second. A photo or short video of the moment, taken on a phone, records the time for you.</li>
+  <li><b>What moment.</b> For the summit, note when the sun is centred on it, or when its edge first touches
+  and last leaves it. For the last sun, note when the last sliver disappears. That is the upper edge of the
+  disk, a minute or so after the centre.</li>
+  <li><b>Which evening.</b> Pick a clear one. Cap cloud on the summit is common, and haze or smoke near the
+  horizon can make the last minutes hard to call. The BOM forecast for Hobart helps, and so does looking out
+  the window at five o'clock.</li>
+  <li><b>Expect agreement to within</b> about a minute and a day for the summit, if the position is right. For
+  last sun, expect a few minutes in open ground; more where a tree, house or the near side of a hill makes
+  the skyline rather than the mountain.</li>
+</ul>
+
+<h2>What the data and the method can and cannot say</h2>
+<h3>The data</h3>
+<ul>
+  <li><b>Bare earth.</b> The Tasmania 2 m DEM is ground level only. In a street the real skyline is often a
+  roof, a tree or a power pole, and these are not in the model. A prediction that says "sun until 19:40" means
+  the land does not block it until then.</li>
+  <li><b>Mixed sources.</b> About 65% of the state's DEM comes from LiDAR; the rest is interpolated from
+  contours and spot heights at an effective 10 m. Around kunanyi and Hobart much of the ground has been flown
+  with LiDAR, but not every hill on the skyline of every suburb.</li>
+  <li><b>Its age.</b> The file is dated 2021. Earthworks, quarries and cuttings since then are not in it.</li>
+  <li><b>The summit point.</b> Its position and height come from public gazetteer values. If they were ten
+  metres out sideways, that would be under a tenth of a degree from eight kilometres away.</li>
+</ul>
+<h3>The method</h3>
+<ul>
+  <li><b>Coarse cells round off ridges.</b> The evening map uses 16 m cells for the city, and the far skyline
+  uses 64 m. Averaging into cells lowers sharp ridge tops a little, so the model's skyline sits slightly low and
+  its last-sun times run slightly late, most of all for spots close under a ridge. The skyline probe for a
+  single spot reads the same cells, so it has the same bias.</li>
+  <li><b>Steps in time.</b> The map samples the sun every 5 minutes, so its times are good to about two and a
+  half minutes. The chart steps by the minute against a skyline traced every degree of azimuth.</li>
+  <li><b>Refraction.</b> The air bends low sunlight upward, raising the sun by 0.1 to 0.2 degree when it
+  is 5 to 10 degrees up, and more nearer the horizon. Standard values are used for the sun and for the line of sight to the
+  summit (k = 0.13). Cold air pooled over the Derwent on a still evening can change that a little. At these
+  heights that is seconds to a minute, more for the last sun on the eastern shore, where the mountain's
+  skyline is lowest.</li>
+  <li><b>Earth curvature.</b> Included: at 10 km the ground falls away by about 7 m, enough to lower the
+  summit by 0.04 degrees.</li>
+  <li><b>The sun's disk.</b> The sun is half a degree across and moves its own width in about two minutes
+  here. Predictions are for its centre, so the first touch and the last sliver come about a minute either
+  side.</li>
+  <li><b>Your position and height.</b> Over seven to twelve kilometres, the summit alignment moves by one to two
+  days for every 100 m you stand further north or south. Height matters much less: 10 m higher moves it by a
+  tenth of a day or so. The card works out both for your spot. Near the grey edge, where the sun only just
+  reaches the summit's direction around the solstice, the dates spread out and small moves matter more.</li>
+</ul>
+<p>Put together, the summit alignment is a sharp test of the geometry, sun and clocks, almost free of the
+terrain data. Last sun is a test of the terrain data and the skyline method, but blurred by whatever stands
+between you and the mountain. That blurring is the most useful thing to learn about: where a well-placed
+observation disagrees, the DEM, the cell size or the bare-earth assumption is the likely reason.</p>
+
+<h2>Send an observation</h2>
+<p>If you check either, it helps to have it written down in one place, with where you stood, when, and what you
+saw: open an <a href="https://github.com/mdsumner/lunashade/issues/new?template=observation.yml">observation
+issue</a> on the lunashade repository. A link from the card or the main page records the exact spot.</p>
+
+<footer>
+Elevation: Tasmania 2 m DEM, Mineral Resources Tasmania / theLIST (CC BY 3.0 AU), read from the cloud-optimised
+copy on Source Cooperative. Basemap: theLIST (CC BY 3.0 AU). Sun position: NOAA solar calculator equations. Summit:
+42.896000 S, 147.237306 E, 1271 m. Method notes: <a href="./">lunashade notes</a>,
+<a href="viewshed.html">viewshed</a>, <a href="cog.html">the DEM file</a>. Prototype; not for safety-critical use.
+</footer>
+</article>
+<script src="../js/sun.js"></script>
+<script src="../js/align.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/dem.js"></script>
+<script src="../js/hobart.js"></script>
+</body>
+</html>
